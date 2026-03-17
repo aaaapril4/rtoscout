@@ -107,13 +107,16 @@ class VectorStore:
         """Return page_content of the chunk with given company_id and chunk_index, or None if not found."""
         chroma = self._get_chroma()
         try:
-            # langchain_chroma Chroma exposes _collection (chromadb Collection)
             coll = getattr(chroma, "_collection", None) or getattr(chroma, "collection", None)
             if coll is None:
                 return None
+
+            # IMPORTANT: Don't filter on chunk_index in Chroma `where` because it can be
+            # type-sensitive (stored as str/float). Filter by company_id only, then
+            # match chunk_index in Python via int() conversion.
             result = coll.get(
-                where={"company_id": company_id, "chunk_index": chunk_index},
-                limit=1,
+                where={"company_id": company_id},
+                include=["documents", "metadatas"],
             )
             if not result or not result.get("documents"):
                 return None

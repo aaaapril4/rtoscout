@@ -1,6 +1,7 @@
 """Clean HTML, extract text, and chunk 10-K content."""
 from pathlib import Path
 from typing import Optional
+import re
 
 from bs4 import BeautifulSoup
 
@@ -12,24 +13,6 @@ class Preprocessor:
 
     def __init__(self) -> None:
         pass
-
-    def extract_text_from_file(self, path: str | Path) -> str:
-        """Extract and clean text from a local file (HTML or plain text)."""
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-        raw = path.read_text(encoding="utf-8", errors="replace")
-        if path.suffix.lower() in (".html", ".htm"):
-            return self._clean_html_to_string(raw)
-        return self._normalize_whitespace(raw)
-
-    def extract_text_from_dir(self, dir_path: str | Path) -> str:
-        """Find the primary document in a 10-K download dir and extract text (usually .htm)."""
-        dir_path = Path(dir_path)
-        if not dir_path.is_dir():
-            raise NotADirectoryError(f"Not a directory: {dir_path}")
-        primary = self._find_primary_html(dir_path)
-        return self.extract_text_from_file(primary)
 
     def _find_primary_html(self, dir_path: Path) -> Path:
         """Return path to primary .htm/.html in directory (exclude index)."""
@@ -48,48 +31,70 @@ class Preprocessor:
             tag.decompose()
         return soup.get_text(separator="\n", strip=True)
 
-    def _strip_style_attributes(self, soup: BeautifulSoup) -> None:
-        """Remove all style attributes from every element in the tree."""
-        for tag in soup.find_all(True):
-            if tag.has_attr("style"):
-                del tag["style"]
-
     def _merge_hr_separated_paragraphs(self, paragraphs: list[str]) -> list[str]:
         """
-        Merge paragraphs that are split only by an <hr> marker.
-        This is mainly for plain-text inputs or HTML-derived lists that contain
-        literal <hr> markers.
+        Merge paragraphs based on semantic cues and <hr> proximity.
+        
+        Rules:
+        1. If a paragraph starts with a lowercase letter, merge it (highest priority).
+        2. If an <hr> is nearby (either immediately before or immediately after), 
+        check if the previous paragraph lacks terminal punctuation.
+        3. Terminal punctuation includes: . ! ? " ” ) ]
         """
+        if not paragraphs:
+            return []
 
         def _is_hr(p: str) -> bool:
             s = p.strip().lower().replace(" ", "")
             return s.startswith("<hr")
-
-        if not paragraphs:
-            return paragraphs
+        
+        def _is_pure_symbol(p: str) -> bool:
+            s = p.strip().lower().replace(" ", "")
+            return bool(re.search(r'^[^a-zA-Z]+$', s))
 
         merged: list[str] = []
-        i = 0
         n = len(paragraphs)
-        while i < n:
-            p = paragraphs[i]
-            if _is_hr(p):
-                # If an <hr> is between two paragraphs, merge next into previous.
-                if merged and i + 1 < n:
-                    # Only merge when the previous paragraph is likely still ongoing.
-                    # Heuristic: if it ends with a period, treat it as a full sentence/paragraph and do not merge.
-                    prev = merged[-1].rstrip()
-                    if not prev.endswith("."):
-                        next_p = paragraphs[i + 1]
-                        merged[-1] = (prev + " " + next_p.lstrip()).strip()
-                        i += 2
-                        continue
-                # Otherwise just skip the <hr>
-                i += 1
+        
+        for i in range(n):
+            p_strip = paragraphs[i].strip()
+            
+            if not p_strip or _is_hr(p_strip) or _is_pure_symbol(p_strip):
                 continue
-            merged.append(p)
-            i += 1
+
+            if not merged:
+                merged.append(p_strip)
+            else:
+                prev = merged[-1]
+                
+                first_letter_match = re.search(r'[a-zA-Z]', p_strip)
+            
+                if first_letter_match:
+                    is_continuation = first_letter_match.group().islower()
+                else:
+                    is_continuation = False
+                
+                has_hr_nearby = False
+                
+                if i > 0 and _is_hr(paragraphs[i-1]):
+                    has_hr_nearby = True
+                elif i > 1 and _is_hr(paragraphs[i-2]):
+                    has_hr_nearby = True
+                elif i + 1 < n and _is_hr(paragraphs[i+1]):
+                    has_hr_nearby = True
+                elif i + 2 < n and _is_hr(paragraphs[i+2]):
+                    has_hr_nearby = True
+
+                terminal_punctuations = ('.', '!', '?', '"', '”', ')', ']')
+                is_unfinished = not prev.endswith(terminal_punctuations)
+                
+                if is_continuation or (has_hr_nearby and is_unfinished):
+                    merged[-1] = " ".join(f"{prev} {p_strip}".split())
+                else:
+                    # Treat as a standalone paragraph
+                    merged.append(p_strip)
+
         return merged
+
 
     def _extract_paragraphs_from_html(self, html: str) -> list[str]:
         """
@@ -104,13 +109,18 @@ class Preprocessor:
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style"]):
             tag.decompose()
-        self._strip_style_attributes(soup)
+        
+        TARGET_CONTAINERS = {"div", "span", "p", "td", "th"}
         paragraphs: list[str] = []
-        for el in soup.find_all(["div", "span", "hr"]):
+        for el in soup.find_all(list(TARGET_CONTAINERS) + ["hr"]):
             name = getattr(el, "name", "").lower()
             if name == "hr":
                 paragraphs.append("<hr>")
                 continue
+            
+            if el.find(list(TARGET_CONTAINERS)):
+                continue
+            
             text = el.get_text(separator=" ", strip=True)
             text = " ".join(text.split())
             if text:

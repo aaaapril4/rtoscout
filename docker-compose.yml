@@ -1,0 +1,39 @@
+# RTOScout — run pipeline or Jupyter in Docker
+# Optional: create .env for OLLAMA_BASE_URL (e.g. http://host.docker.internal:11434) and use --env-file .env
+services:
+  rtoscout:
+    build: .
+    volumes:
+      # Mount local code so container uses your edits
+      - ./rtoscout:/app/rtoscout:ro
+      # Persist vector store and any local 10-K data
+      - chroma_data:/app/chroma_rto
+      - ./data:/app/data:ro
+    stdin_open: true
+    tty: true
+    # Override to run pipeline, e.g.:
+    #   docker compose run --rm rtoscout python main.py --tickers AAPL,MSFT --output /app/data/out.csv
+    #   docker compose run --rm -v $(pwd):/app/output rtoscout python main.py --input data/companies.json --output /app/output/results.json
+
+  # Jupyter: docker compose --profile jupyter run --rm -p 8888:8888 jupyter
+  # Open http://localhost:8888/?token=rtoscout (or use the URL printed in the terminal)
+  jupyter:
+    build: .
+    environment:
+      JUPYTER_TOKEN: rtoscout
+      PYTHONPATH: /app
+    ports:
+      - "8888:8888"
+    volumes:
+      # Mount local code so container uses your edits
+      - ./rtoscout:/app/rtoscout
+      - chroma_data:/app/chroma_rto
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+    working_dir: /app
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root notebooks/
+    profiles:
+      - jupyter
+
+volumes:
+  chroma_data:

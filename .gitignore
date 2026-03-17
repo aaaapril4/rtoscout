@@ -1,0 +1,16 @@
+.venv/
+venv/
+.env
+.DS_Store
+chroma_rto/
+data/sec_filings/
+sec-edgar-filings/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+rto_scores.json
+rto_scores.csv
+notebooks/.ipynb_checkpoints/
+*.ipynb_checkpoints
