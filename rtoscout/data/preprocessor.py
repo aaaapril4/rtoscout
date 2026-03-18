@@ -169,7 +169,7 @@ class Preprocessor:
         self,
         path: str | Path,
         company_id: str,
-        company_name: Optional[str] = None,
+        company_name: str,
     ) -> list[DocumentChunk]:
         """Read file and chunk: HTML by div/span, plain text by double newline."""
         path = Path(path)
@@ -201,8 +201,7 @@ class Preprocessor:
         self,
         dir_path: str | Path,
         company_id: str,
-        company_name: Optional[str] = None,
-        year: Optional[int] = None,
+        company_name: str,
     ) -> list[DocumentChunk]:
         """Read primary HTML in directory and chunk by div/span."""
         dir_path = Path(dir_path)

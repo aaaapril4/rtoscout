@@ -34,7 +34,7 @@ class Retriever:
     def _save_company_context(
         self,
         company_id: str,
-        company_name: Optional[str],
+        company_name: str,
         context: str,
     ) -> None:
         """Write one context file per company_id, including the SEC source URL."""
@@ -52,10 +52,10 @@ class Retriever:
 
         out_dir = DATA_DIR / "rto_outputs"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / f"{company_name or company_id}_{year}.txt"
+        out_file = out_dir / f"{company_name}_{year}.txt"
 
         with out_file.open("w", encoding="utf-8") as f:
-            f.write(f"company_name: {company_name or company_id}\n")
+            f.write(f"company_name: {company_name}\n")
             f.write(f"year: {year}\n")
             if source_url:
                 f.write(f"source_url: {source_url}\n")
@@ -65,7 +65,7 @@ class Retriever:
     def get_rto_context(
         self,
         company_id: str,
-        company_name: Optional[str] = None,
+        company_name: str,
     ) -> str:
         """
         Retrieve RTO-related context via two-pass semantic search.
