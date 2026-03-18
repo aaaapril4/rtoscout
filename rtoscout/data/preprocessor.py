@@ -187,8 +187,9 @@ class Preprocessor:
                     company_name=company_name,
                     metadata={
                         "chunk_index": i,
-                        "year": year,
                         **({"source_url": source_url} if source_url else {}),
+                        **({"year": year} if year else {}),
+                        **({"company_name": company_name} if company_name else {}),
                     },
                 )
                 for i, p in enumerate(paragraphs)
