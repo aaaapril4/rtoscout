@@ -110,13 +110,14 @@ class VectorStore:
             coll = getattr(chroma, "_collection", None) or getattr(chroma, "collection", None)
             if coll is None:
                 return None
-
-            # IMPORTANT: Don't filter on chunk_index in Chroma `where` because it can be
-            # type-sensitive (stored as str/float). Filter by company_id only, then
-            # match chunk_index in Python via int() conversion.
             result = coll.get(
-                where={"company_id": company_id},
-                include=["documents", "metadatas"],
+                where={
+                    "$and": [
+                        {"company_id": company_id},
+                        {"chunk_index": chunk_index}
+                    ]
+                },
+                limit=1,
             )
             if not result or not result.get("documents"):
                 return None
