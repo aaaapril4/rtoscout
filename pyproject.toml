@@ -1,17 +1,12 @@
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
 [tool.poetry]
-name = "RTOScout"
+name = "rtoscout"
 version = "0.1.0"
-description = "RTOScout: RTO 10-K RAG + LLM scoring (local: HuggingFace + Ollama)"
+description = "RTOScout: RTO 10-K RAG + LLM scoring"
+authors = ["Yaqi Jie <jieyaqi@msu.edu>"]
 readme = "README.md"
-authors = []
-packages = [{ include = "rtoscout", from = "." }]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = ">3.10"
 langchain = ">=0.3.0"
 langchain-community = ">=0.3.0"
 langchain-chroma = ">=0.1.0"
@@ -25,3 +20,7 @@ pydantic = ">=2.0.0"
 sec-edgar-downloader = ">=5.0.0"
 sentence-transformers = ">=2.2.0"
 jupyter = ">=1.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
