@@ -2,6 +2,7 @@
 from typing import Dict, List, Optional, Set
 
 from ..config import (
+    DATA_DIR,
     RTO_QUERY_GROUP_A,
     RTO_QUERY_GROUP_B,
     TOP_K_RETRIEVAL,
@@ -29,6 +30,37 @@ class Retriever:
         self.top_k = top_k
         self._queries_a = group_a or RTO_QUERY_GROUP_A
         self._queries_b = group_b or RTO_QUERY_GROUP_B
+
+    def _save_company_context(
+        self,
+        company_id: str,
+        company_name: Optional[str],
+        context: str,
+    ) -> None:
+        """Write one context file per company_id, including the SEC source URL."""
+        if not context:
+            return
+
+        source_url = None
+        rows = self.vector_store.get_all_chunks_for_companies([company_id])
+        for row in rows:
+            meta = row.get("metadata") or {}
+            source_url = meta.get("source_url")
+            year = meta.get("year")
+            if source_url:
+                break
+
+        out_dir = DATA_DIR / "rto_outputs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f"{company_id}.txt"
+
+        with out_file.open("w", encoding="utf-8") as f:
+            f.write(f"company_id: {company_id}\n")
+            f.write(f"year: {year}\n")
+            if source_url:
+                f.write(f"source_url: {source_url}\n")
+            f.write("\n==== Retrieved Context ====\n\n")
+            f.write(context)
 
     def get_rto_context(
         self,
@@ -89,4 +121,6 @@ class Retriever:
             seen_content.add(block)
             parts.append(block)
 
-        return "\n\n---\n\n".join(parts) if parts else ""
+        context = "\n\n---\n\n".join(parts) if parts else ""
+        self._save_company_context(company_id, company_name, context)
+        return context

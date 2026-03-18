@@ -14,6 +14,42 @@ class Preprocessor:
     def __init__(self) -> None:
         pass
 
+    def _sec_archives_url_from_path(self, path: Path) -> Optional[str]:
+        """
+        Conversion from a downloaded SEC filing path to an SEC Archives URL.
+        """
+        parts = path.resolve().parts
+        if "sec-edgar-filings" not in parts:
+            return None
+        try:
+            idx = parts.index("sec-edgar-filings")
+            cik = int(parts[idx + 1])
+            accession = parts[idx + 3].replace("-", "")
+            return f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}"
+        except (ValueError, IndexError, TypeError):
+            return None
+
+    def extract_fiscal_year_from_document(self, soup: BeautifulSoup) -> Optional[int]:
+        """
+        Extract the document period end year from the 10-K HTML.
+        Looks for the inline XBRL block with name="dei:DocumentPeriodEndDate"
+        (content is typically "Month DD, YYYY"). Returns the 4-digit year or None.
+        """
+        try:
+            el = soup.find(attrs={"name": "dei:DocumentPeriodEndDate"})
+            if el is None:
+                return None
+            text = (el.get_text() or "").strip()
+            if not text:
+                return None
+            # Match 4-digit year (e.g. from "December 31, 2019" or "September 26, 2020").
+            match = re.search(r"\b(19|20)\d{2}\b", text)
+            if match:
+                return int(match.group(0))
+            return None
+        except Exception:
+            return None
+
     def _find_primary_html(self, dir_path: Path) -> Path:
         """Return path to primary .htm/.html in directory (exclude index)."""
         candidates = list(dir_path.glob("*.htm")) + list(dir_path.glob("*.html"))
@@ -23,13 +59,6 @@ class Preprocessor:
         if not candidates:
             raise FileNotFoundError(f"No .htm/.html in {dir_path}")
         return candidates[0]
-
-    def _clean_html_to_string(self, html: str) -> str:
-        """Legacy: extract all text from HTML as one string (used when not chunking from div/span)."""
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        return soup.get_text(separator="\n", strip=True)
 
     def _merge_hr_separated_paragraphs(self, paragraphs: list[str]) -> list[str]:
         """
@@ -107,6 +136,9 @@ class Preprocessor:
         together.
         """
         soup = BeautifulSoup(html, "html.parser")
+
+        year = self.extract_fiscal_year_from_document(soup)
+
         for tag in soup(["script", "style"]):
             tag.decompose()
         
@@ -127,53 +159,37 @@ class Preprocessor:
                 paragraphs.append(text)
         paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
         paragraphs = [p for p in paragraphs if not p.strip().lower().replace(" ", "").startswith("<hr")]
-        return paragraphs
+        return paragraphs, year
 
     def _normalize_whitespace(self, text: str) -> str:
         """Strip lines and drop empty; keep one newline between lines."""
         return "\n".join(line.strip() for line in text.splitlines() if line.strip())
-
-    def chunk(
-        self,
-        text: str,
-        company_id: str,
-        company_name: Optional[str] = None,
-        year: Optional[int] = None,
-    ) -> list[DocumentChunk]:
-        """Split plain text into chunks by paragraph (double newline)."""
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-        paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
-        return [
-            DocumentChunk(
-                content=p,
-                company_id=company_id,
-                company_name=company_name,
-                metadata={"chunk_index": i},
-            )
-            for i, p in enumerate(paragraphs)
-        ]
 
     def load_and_chunk_file(
         self,
         path: str | Path,
         company_id: str,
         company_name: Optional[str] = None,
-        year: Optional[int] = None,
     ) -> list[DocumentChunk]:
         """Read file and chunk: HTML by div/span, plain text by double newline."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text(encoding="utf-8", errors="replace")
+        source_url = self._sec_archives_url_from_path(path)
         if path.suffix.lower() in (".html", ".htm"):
-            paragraphs = self._extract_paragraphs_from_html(raw)
+            paragraphs, year = self._extract_paragraphs_from_html(raw)
             paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
             return [
                 DocumentChunk(
                     content=p,
                     company_id=company_id,
                     company_name=company_name,
-                    metadata={"chunk_index": i},
+                    metadata={
+                        "chunk_index": i,
+                        "year": year,
+                        **({"source_url": source_url} if source_url else {}),
+                    },
                 )
                 for i, p in enumerate(paragraphs)
             ]
@@ -192,4 +208,4 @@ class Preprocessor:
         if not dir_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {dir_path}")
         primary = self._find_primary_html(dir_path)
-        return self.load_and_chunk_file(primary, company_id, company_name, year=year)
+        return self.load_and_chunk_file(primary, company_id, company_name)

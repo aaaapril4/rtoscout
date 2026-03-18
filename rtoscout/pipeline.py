@@ -1,7 +1,7 @@
 """Facade: data → index → retrieve → score pipeline."""
 import json
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from .config import CHROMA_PERSIST_DIR
 from .data.preprocessor import Preprocessor
@@ -40,16 +40,28 @@ class RTOPipeline:
         If save_chunks_and_context_path is set, write one JSON with processed_chunks and retrieved_context_by_company.
         """
         all_chunks: List[DocumentChunk] = []
+        # (company, cid_used_for_chunks) so retrieval uses the same cid as indexing
+        company_and_cid: List[Tuple[CompanyInput, str]] = []
 
         if not skip_index:
             for company in companies:
-                chunks = self._load_and_chunk(company)
+                chunks, cid = self._load_and_chunk(company)
                 all_chunks.extend(chunks)
+                company_and_cid.append((company, cid))
             if all_chunks:
                 self._vector_store = VectorStore.build_from_chunks(
                     chunks=all_chunks,
                     persist_directory=self.persist_dir,
                 )
+        else:
+            for company in companies:
+                cid = company.company_id
+                if company.year is not None:
+                    suffix = f"_{company.year}"
+                    if not cid.endswith(suffix):
+                        cid = f"{cid}_{company.year}"
+                company_and_cid.append((company, cid))
+
         if self._vector_store is None:
             self._vector_store = VectorStore.load(persist_directory=self.persist_dir)
 
@@ -58,15 +70,8 @@ class RTOPipeline:
 
         results: List[CompanyRTOOutput] = []
         retrieved_context_by_company: dict[str, str] = {}
-        for company in companies:
+        for company, cid in company_and_cid:
             name = company.company_name or company.company_id
-            # Use a company_id that encodes the year for retrieval when a year is set.
-            # If the user already provided an id like "AAPL_2023", don't append the year again.
-            cid = company.company_id
-            if company.year is not None:
-                suffix = f"_{company.year}"
-                if not cid.endswith(suffix):
-                    cid = f"{cid}_{company.year}"
             context = self._retriever.get_rto_context(cid, name)
             retrieved_context_by_company[cid] = context
             score_result = self._analyzer.score_rto(name, cid, context)
@@ -110,28 +115,55 @@ class RTOPipeline:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    def _load_and_chunk(self, company: CompanyInput) -> List[DocumentChunk]:
-        """Load 10-K and chunk according to company config."""
+    def _load_and_chunk(self, company: CompanyInput) -> Tuple[List[DocumentChunk], str]:
+        """Load 10-K and chunk according to company config. Returns (chunks, cid_used) so run() can use the same cid for retrieval."""
         base_cid = company.company_id
         name = company.company_name or base_cid
         year = company.year
-        # For chunking and storage we prefer a company_id that explicitly
-        # encodes the year (e.g. AAPL_2023). If the provided id already
-        # includes the year suffix, we reuse it.
-        cid = base_cid
-        if year is not None:
-            suffix = f"_{year}"
-            if not cid.endswith(suffix):
-                cid = f"{cid}_{year}"
+        filing_path: Optional[Path] = None
+
         if company.source == "edgar":
-            filing_path = self._downloader.download_10k(company)
-            return self._preprocessor.load_and_chunk_dir(filing_path, cid, name, year=year)
+            filing_path = Path(self._downloader.download_10k(company))
+        elif company.source == "file" and company.path:
+            filing_path = Path(company.path)
+
+        if filing_path is not None and filing_path.exists():
+            primary_path = (
+                self._preprocessor._find_primary_html(filing_path)
+                if filing_path.is_dir()
+                else filing_path
+            )
+            doc_year = self._preprocessor.extract_fiscal_year_from_document(primary_path)
+            if doc_year is not None:
+                year = doc_year
+                # Strip trailing _YYYY from base_cid so we can attach document year
+                parts = base_cid.split("_")
+                base = parts[0] if (len(parts) >= 2 and parts[-1].isdigit()) else base_cid
+                cid = f"{base}_{year}"
+            else:
+                cid = base_cid
+                if year is not None:
+                    suffix = f"_{year}"
+                    if not cid.endswith(suffix):
+                        cid = f"{cid}_{year}"
+        else:
+            cid = base_cid
+            if year is not None:
+                suffix = f"_{year}"
+                if not cid.endswith(suffix):
+                    cid = f"{cid}_{year}"
+
+        if company.source == "edgar" and filing_path is not None:
+            chunks = self._preprocessor.load_and_chunk_dir(filing_path, cid, name, year=year)
+            return (chunks, cid)
         if company.source == "file" and company.path:
             path = Path(company.path)
             if path.is_dir():
-                return self._preprocessor.load_and_chunk_dir(path, cid, name, year=year)
-            return self._preprocessor.load_and_chunk_file(path, cid, name, year=year)
-        raise ValueError(f"Company {cid}: need source=edgar or source=file with path")
+                chunks = self._preprocessor.load_and_chunk_dir(path, cid, name, year=year)
+            else:
+                chunks = self._preprocessor.load_and_chunk_file(path, cid, name, year=year)
+            return (chunks, cid)
+        raise ValueError(f"Company {base_cid}: need source=edgar or source=file with path")
 
 
 def run_pipeline(
