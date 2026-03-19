@@ -8,10 +8,9 @@ class CompanyInput(BaseModel):
     """Single company input for download or local file."""
 
     company_id: str = Field(..., description="Unique id, e.g. ticker or CIK")
-    company_name: Optional[str] = None
+    ticker: str = Field(..., description="Ticker")
     source: Literal["file", "edgar"] = "edgar"
     path: Optional[str] = Field(None, description="Local 10-K path when source=file")
-    ticker: Optional[str] = Field(None, description="Ticker when source=edgar")
     cik: Optional[str] = None
     year: Optional[int] = Field(None, description="10-K year; default latest")
 
