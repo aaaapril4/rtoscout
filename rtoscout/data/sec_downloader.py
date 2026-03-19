@@ -36,7 +36,7 @@ class SecDownloader:
         """
         cik = company.cik
         ticker = (company.ticker or company.company_id).strip().upper()
-        if not cik:
+        if cik is None:
             cik = self._ticker_to_cik(ticker)
         if company.year is not None:
             after = f"{company.year}-01-01"

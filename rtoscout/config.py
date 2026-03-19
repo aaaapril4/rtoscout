@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 PACK_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACK_ROOT.parent
-DATA_DIR = PROJECT_ROOT / "data"
-CHROMA_PERSIST_DIR = PROJECT_ROOT / "chroma_rto"
+DATA_DIR = Path('/mnt/scratch/jieyaqi/rtoscout') / "data"
+CHROMA_PERSIST_DIR = Path('/mnt/scratch/jieyaqi/rtoscout') / "chroma_rto"
 
 # Load .env from project root, then cwd. In Docker use env_file so vars are in the process env.
 _env_file = PROJECT_ROOT / ".env"

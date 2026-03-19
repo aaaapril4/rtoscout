@@ -55,7 +55,6 @@ class RTOPipeline:
 
         self._retriever = Retriever(vector_store=self._vector_store, top_k=TOP_K_RETRIEVAL)
         # self._analyzer = Analyzer()
-        print("start retrieving")
         # results: List[CompanyRTOOutput] = []
         for company in companies:
             context = self._retriever.get_rto_context(company.company_id, company.ticker)
