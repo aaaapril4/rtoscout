@@ -156,6 +156,28 @@ class VectorStore:
             return out
         except Exception:
             return []
+        
+    def close(self) -> None:
+        import gc
+        import torch
+
+        if self._store is not None:
+            try:
+                client = getattr(self._store, "_client", None)
+                if client and hasattr(client, "clear_system_cache"):
+                    client.clear_system_cache()
+                
+                self._store = None
+            except Exception as e:
+                print(f"Warning: Cleanup error for ChromaDB: {e}")
+
+        if self._embedder is not None and hasattr(self._embedder, "close"):
+            self._embedder.close()
+
+        gc.collect()
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     @classmethod
     def load(
