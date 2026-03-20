@@ -90,7 +90,7 @@ class Retriever:
         for idx in hits_a_indices:
             coverage_zone.update({idx - 1, idx, idx + 1})
 
-        final_hits: Dict[int, str] = {}
+        hit_indices = set()
         for query in self._queries_b:
             docs = self.vector_store.similarity_search(query, k=self.top_k, filter=filter_dict)
             for doc in docs:
@@ -98,29 +98,36 @@ class Retriever:
                 if len(content.split()) < MIN_CHUNK_LENGTH:
                     continue
                 idx = doc.metadata.get("chunk_index")
-                if idx is None or int(idx) not in coverage_zone:
-                    continue
-                
-                chunk_idx = int(idx)
-                if chunk_idx in final_hits:
-                    continue
-
-                prev = self.vector_store.get_chunk_content(company_id, chunk_idx - 1) if chunk_idx - 1 in hits_a_indices else ""
-                next_ = self.vector_store.get_chunk_content(company_id, chunk_idx + 1) if chunk_idx + 1 in hits_a_indices else ""
-                
-                block_parts = [p for p in (prev, content, next_) if p and p.strip()]
-                final_hits[chunk_idx] = "\n\n".join(p.strip() for p in block_parts)
-
-        seen_content: Set[str] = set()
-        parts: List[str] = []
+                if idx is not None and int(idx) in coverage_zone:
+                    chunk_idx = int(idx)
+                    hit_indices.add(chunk_idx)
+                    if chunk_idx - 1 in hits_a_indices:
+                        hit_indices.add(chunk_idx - 1)
+                    if chunk_idx + 1 in hits_a_indices:
+                        hit_indices.add(chunk_idx + 1) 
         
-        for idx in sorted(final_hits.keys()):
-            block = final_hits[idx]
-            if block in seen_content:
-                continue
-            seen_content.add(block)
-            parts.append(block)
+        if not hit_indices:
+            return ""
 
-        context = "\n\n---\n\n".join(parts) if parts else ""
+        sorted_indices = sorted(list(hit_indices))
+        block_parts = []
+        print(sorted_indices)
+        
+        prev = -999
+        for i in sorted_indices:
+            p = self.vector_store.get_chunk_content(company_id, i).strip()
+            
+            if not p:
+                continue
+
+            if not block_parts or i != prev + 1:
+                block_parts.append(p)
+            else:
+                block_parts[-1] += "\n\n" + p
+                print(i)
+            
+            prev = i
+            
+        context = "\n\n---\n\n".join(block_parts) if block_parts else ""
         self._save_company_context(company_id, company_name, context)
-        return context
+        return block_parts

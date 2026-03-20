@@ -1,10 +1,10 @@
 """Facade: data → index → retrieve → score pipeline."""
-import json, gc, shutil, time
+import gc, shutil, time
 import concurrent.futures
 import torch
 from pathlib import Path
 from tqdm import tqdm
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .config import CHROMA_PERSIST_DIR, DATA_DIR, TOP_K_RETRIEVAL
 from .data.preprocessor import Preprocessor
@@ -27,7 +27,7 @@ class RTOPipeline:
     def run(
         self,
         company: CompanyInput,
-        years: List[int],
+        years: List[int] = None,
         skip_index: bool = False,
     ) -> List[CompanyRTOOutput]:
         """
@@ -36,7 +36,15 @@ class RTOPipeline:
         """
         all_chunks: List[DocumentChunk] = []
         if years is not None:
-            companies = [CompanyInput(company_id=f"{company.company_id}_{year}", ticker=company.ticker, source=company.source, year=year, path=company.path, cik=company.cik) for year in years]
+            if company.source == "file" and company.path:
+                companies = []
+                years = set(years)
+                for p in Path(company.path).iterdir():
+                    yr = int("20" + p.stem.split('-')[1])
+                    if yr in years:
+                        companies.append(CompanyInput(company_id=f"{company.company_id}_{yr}", ticker=company.ticker, source=company.source, year=yr, path="/".join([company.path, p.stem]), cik=company.cik))
+            else:
+                companies = [CompanyInput(company_id=f"{company.company_id}_{year}", ticker=company.ticker, source=company.source, year=year, path=company.path, cik=company.cik) for year in years]
         else:
             companies = [company]
 
@@ -117,20 +125,10 @@ def process_single_company_worker(company: CompanyInput, years: List[int]):
 
 
 def run_pipeline(
-    company_json_path: str, 
+    companies: List[CompanyInput],
     year_list: List[int], 
     max_workers: int = 3
 ):
-    with open(company_json_path, 'r', encoding='utf-8') as f:
-            company_data = json.load(f)
-
-    companies = [
-        CompanyInput(
-            ticker=item['ticker'],
-            company_id=item['ticker'],
-            cik=str(item['cik_str'])
-        ) for item in company_data.values()
-    ]
 
     total_tasks = len(companies)
     all_final_results = []

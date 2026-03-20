@@ -42,7 +42,7 @@ RTO_QUERY_GROUP_B = [
     "hybrid work",
     "work from home",
 ]
-TOP_K_RETRIEVAL = 8
+TOP_K_RETRIEVAL = 10
 MIN_CHUNK_LENGTH = 5
 SCORE_MIN = 0
 SCORE_MAX = 10
