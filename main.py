@@ -24,4 +24,4 @@ for item in company_data.values():
     comp.path = str(secPath / comp.cik / "10-K")
     companies.append(comp)
 
-run_pipeline(companies, [2020, 2021, 2022, 2023, 2024, 2025, 2026], 40)
+run_pipeline(companies, [2020, 2021, 2022, 2023, 2024, 2025, 2026], 20)

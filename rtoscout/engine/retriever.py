@@ -111,7 +111,6 @@ class Retriever:
 
         sorted_indices = sorted(list(hit_indices))
         block_parts = []
-        print(sorted_indices)
         
         prev = -999
         for i in sorted_indices:
@@ -124,7 +123,6 @@ class Retriever:
                 block_parts.append(p)
             else:
                 block_parts[-1] += "\n\n" + p
-                print(i)
             
             prev = i
             

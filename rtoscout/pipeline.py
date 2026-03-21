@@ -47,6 +47,9 @@ class RTOPipeline:
                 companies = [CompanyInput(company_id=f"{company.company_id}_{year}", ticker=company.ticker, source=company.source, year=year, path=company.path, cik=company.cik) for year in years]
         else:
             companies = [company]
+        
+        if not companies:
+            return None
 
         if not skip_index:
             for company in companies:
@@ -75,6 +78,7 @@ class RTOPipeline:
             # ))
 
         # return results
+        print("finish processing ", company.ticker)
         return None
     
 

@@ -13,12 +13,18 @@ class SecDownloader:
     def __init__(
         self,
         download_dir: Optional[Path] = None,
-        company_name: str = "RTOScout",
-        email: str = "jieyaqi@msu.edu",
     ):
         self.download_dir = Path(download_dir) if download_dir else Path("data/sec_filings")
         self.download_dir.mkdir(parents=True, exist_ok=True)
-        self._downloader = Downloader(
+        self._downloader = None
+
+    def _get_downloader(
+        self,
+        company_name: str = "RTOScout",
+        email: str = "jieyaqi@msu.edu",
+    ):
+        if self._downloader is None:
+            self._downloader = Downloader(
             company_name=company_name,
             email_address=email,
             download_folder=str(self.download_dir),
@@ -34,6 +40,7 @@ class SecDownloader:
         If company.year is set, download the 10-K for that fiscal year (after/before Jan 1–Dec 31).
         Returns the path to the downloaded 10-K directory (accession subdir).
         """
+        self._get_downloader()
         cik = company.cik
         ticker = (company.ticker or company.company_id).strip().upper()
         if cik is None:
