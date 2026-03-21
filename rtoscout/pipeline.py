@@ -43,7 +43,7 @@ class RTOPipeline:
                     yr = int("20" + p.stem.split('-')[1])
                     if yr in years:
                         companies.append(CompanyInput(company_id=f"{company.company_id}_{yr}", ticker=company.ticker, source=company.source, year=yr, path="/".join([company.path, p.stem]), cik=company.cik))
-            else:
+            elif company.source == "edgar":
                 companies = [CompanyInput(company_id=f"{company.company_id}_{year}", ticker=company.ticker, source=company.source, year=year, path=company.path, cik=company.cik) for year in years]
         else:
             companies = [company]
