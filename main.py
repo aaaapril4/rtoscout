@@ -21,7 +21,7 @@ for item in company_data.values():
         )
         cik_set.add(cik)
     
-    comp.path = str(secPath / comp.cik / "10-K")
-    companies.append(comp)
+        comp.path = str(secPath / comp.cik / "10-K")
+        companies.append(comp)
 
 run_pipeline(companies, [2020, 2021, 2022, 2023, 2024, 2025, 2026], 20)

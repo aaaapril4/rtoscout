@@ -82,7 +82,7 @@ class SecDownloader:
         import requests
         resp = requests.get(
             "https://www.sec.gov/files/company_tickers.json",
-            headers={"User-Agent": "RTOScout research@example.com"},
+            headers={"User-Agent": "RTOScout jieyaqi@msu.edu"},
             timeout=30,
         )
         resp.raise_for_status()
