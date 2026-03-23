@@ -37,6 +37,9 @@ class Preprocessor:
         """
         try:
             el = soup.find(attrs={"name": "dei:DocumentPeriodEndDate"})
+            if not el:
+                el = soup.find(lambda tag: tag.name in ['b', 'p', 'span', 'div', 'font'] and "Fiscal Year Ended" in tag.get_text())
+
             if el is None:
                 return None
             text = (el.get_text() or "").strip()
