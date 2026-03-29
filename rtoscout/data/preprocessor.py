@@ -2,6 +2,7 @@
 from pathlib import Path
 from typing import Optional
 import re
+import unicodedata
 
 from bs4 import BeautifulSoup
 
@@ -35,23 +36,39 @@ class Preprocessor:
         Looks for the inline XBRL block with name="dei:DocumentPeriodEndDate"
         (content is typically "Month DD, YYYY"). Returns the 4-digit year or None.
         """
-        try:
-            el = soup.find(attrs={"name": "dei:DocumentPeriodEndDate"})
+        def extract_year(el):
             if not el:
-                el = soup.find(lambda tag: tag.name in ['b', 'p', 'span', 'div', 'font'] and "Fiscal Year Ended" in tag.get_text())
-
-            if el is None:
-                return None
+                return
             text = (el.get_text() or "").strip()
-            if not text:
-                return None
-            # Match 4-digit year (e.g. from "December 31, 2019" or "September 26, 2020").
-            match = re.search(r"\b(19|20)\d{2}\b", text)
+            match = re.search(r"\b(20)\d{2}(?!\d)", text)
             if match:
                 return int(match.group(0))
             return None
+        
+        def get_clean_text(tag):
+            normalized = unicodedata.normalize('NFKD', tag.get_text())
+            return normalized
+        
+        try:
+            for attr_name in ["dei:DocumentPeriodEndDate", "dei:DocumentFiscalYearFocus"]:
+                year = extract_year(soup.find(attrs={"name": attr_name}))
+                if year:
+                    return year
+
+            keyword = r"For\s+(?:[Tt]he\s+)?(?:[Ff]iscal\s+)?(?:[Yy]ear|[Pp]eriod)\s+[Ee]nded[\s\S]*?(\d{4})"
+
+            tagList = ['p', 'span', 'font', 'b', 'tr', 'div']
+            el = soup.find(lambda tag: (
+                            tag.name in tagList and
+                            re.search(keyword, get_clean_text(tag), re.I) and
+                            not tag.find(lambda child: child.name in tagList and re.search(keyword, get_clean_text(child), re.I))
+            ))
+            year = extract_year(el)
+            if year:
+                return year
         except Exception:
-            return None
+            pass
+        return None
 
     def _find_primary_html(self, dir_path: Path) -> Path:
         """Return path to primary .htm/.html in directory (exclude index)."""
