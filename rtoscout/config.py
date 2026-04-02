@@ -8,6 +8,7 @@ PACK_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACK_ROOT.parent
 DATA_DIR = Path('/mnt/scratch/jieyaqi/rtoscout') / "data"
 CHROMA_PERSIST_DIR = Path('/mnt/scratch/jieyaqi/rtoscout') / "chroma_rto"
+FILE_TYPE = "10-Q" # 10-K / 10-Q
 
 # Load .env from project root, then cwd. In Docker use env_file so vars are in the process env.
 _env_file = PROJECT_ROOT / ".env"
@@ -43,6 +44,6 @@ RTO_QUERY_GROUP_B = [
     "work from home",
 ]
 TOP_K_RETRIEVAL = 10
-MIN_CHUNK_LENGTH = 5
+MIN_CHUNK_LENGTH = 20
 SCORE_MIN = 0
 SCORE_MAX = 10

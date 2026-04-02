@@ -67,8 +67,10 @@ class RTOPipeline:
         self._retriever = Retriever(vector_store=self._vector_store, top_k=TOP_K_RETRIEVAL)
         # self._analyzer = Analyzer()
         # results: List[CompanyRTOOutput] = []
-        for company in companies:
-            context = self._retriever.get_rto_context(company.company_id, company.ticker)
+        ticker = companies[0].ticker
+        company_ids = list(set([c.company_id for c in companies]))
+        for company_id in company_ids:
+            context = self._retriever.get_rto_context(company.company_id, ticker)
             # score_result = self._analyzer.score_rto(name, cid, context)
             # results.append(CompanyRTOOutput(
             #     company_id=company.company_id,

@@ -7,6 +7,7 @@ from ..config import (
     RTO_QUERY_GROUP_B,
     TOP_K_RETRIEVAL,
     MIN_CHUNK_LENGTH,
+    FILE_TYPE
 )
 from ..index.vector_store import VectorStore
 
@@ -50,7 +51,7 @@ class Retriever:
             if source_url:
                 break
 
-        out_dir = DATA_DIR / "rto_outputs"
+        out_dir = DATA_DIR / "rto_outputs" / FILE_TYPE
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / f"{company_name}_{year}.txt"
 
