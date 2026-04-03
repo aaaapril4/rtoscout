@@ -3,24 +3,26 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from ..config import FILE_TYPE
+
 
 class CompanyInput(BaseModel):
     """Single company input for download or local file."""
 
-    company_id: str = Field(..., description="Unique id, e.g. ticker or CIK")
     ticker: str = Field(..., description="Ticker")
     source: Literal["file", "edgar"] = "edgar"
-    path: Optional[str] = Field(None, description="Local 10-K path when source=file")
+    path: Optional[str] = Field(None, description="Local 10-K/10-Q path when source=file")
     cik: Optional[str] = None
-    year: Optional[int] = Field(None, description="10-K year; default latest")
+    file_id: Optional[str] = Field(None, description="Filing identifier")
+    file_type: str = Field(default=FILE_TYPE, description="SEC filing form, e.g. 10-K or 10-Q")
 
 
 class DocumentChunk(BaseModel):
     """Text chunk with metadata."""
 
     content: str
-    company_id: str
-    company_name: Optional[str] = None
+    file_id: str
+    ticker: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -34,7 +36,7 @@ class RTOScoreResult(BaseModel):
 class CompanyRTOOutput(BaseModel):
     """RTO analysis output for one company."""
 
-    company_id: str
-    company_name: str
+    file_id: str
+    ticker: str
     rto_score: int = Field(ge=0, le=10)
     rationale: str
