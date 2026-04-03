@@ -34,16 +34,16 @@ class Retriever:
 
     def _save_company_context(
         self,
-        company_id: str,
-        company_name: str,
+        file_id: str,
+        ticker: str,
         context: str,
     ) -> None:
-        """Write one context file per company_id, including the SEC source URL."""
+        """Write one context file per filing (file_id), including the SEC source URL."""
         if not context:
             return
 
         source_url = None
-        rows = self.vector_store.get_all_chunks_for_companies([company_id])
+        rows = self.vector_store.get_all_chunks_for_files([file_id])
         for row in rows:
             meta = row.get("metadata") or {}
             source_url = meta.get("source_url")
@@ -53,10 +53,10 @@ class Retriever:
 
         out_dir = DATA_DIR / "rto_outputs" / FILE_TYPE
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / f"{company_name}_{year}.txt"
+        out_file = out_dir / f"{ticker}_{year}_{file_id}.txt"
 
         with out_file.open("w", encoding="utf-8") as f:
-            f.write(f"company_name: {company_name}\n")
+            f.write(f"ticker: {ticker}\n")
             f.write(f"year: {year}\n")
             if source_url:
                 f.write(f"source_url: {source_url}\n")
@@ -65,14 +65,13 @@ class Retriever:
 
     def get_rto_context(
         self,
-        company_id: str,
-        company_name: str,
+        file_id: str,
+        ticker: str,
     ) -> str:
         """
         Retrieve RTO-related context via two-pass semantic search.
         """
-
-        filter_dict = {"company_id": company_id}
+        filter_dict = {"file_id": file_id}
         hits_a_indices: Set[int] = set()
         for query in self._queries_a:
             docs = self.vector_store.similarity_search(query, k=self.top_k, filter=filter_dict)
@@ -115,7 +114,7 @@ class Retriever:
         
         prev = -999
         for i in sorted_indices:
-            p = self.vector_store.get_chunk_content(company_id, i).strip()
+            p = self.vector_store.get_chunk_content(file_id, i).strip()
             
             if not p:
                 continue
@@ -128,5 +127,5 @@ class Retriever:
             prev = i
             
         context = "\n\n---\n\n".join(block_parts) if block_parts else ""
-        self._save_company_context(company_id, company_name, context)
+        self._save_company_context(file_id, ticker, context)
         return block_parts

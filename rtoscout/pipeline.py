@@ -4,9 +4,9 @@ import concurrent.futures
 import torch
 from pathlib import Path
 from tqdm import tqdm
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
-from .config import CHROMA_PERSIST_DIR, DATA_DIR, TOP_K_RETRIEVAL
+from .config import CHROMA_PERSIST_DIR, DATA_DIR, FILE_TYPE, TOP_K_RETRIEVAL
 from .data.preprocessor import Preprocessor
 from .data.sec_downloader import SecDownloader
 # from .engine.analyzer import Analyzer
@@ -35,31 +35,49 @@ class RTOPipeline:
         skip_index=True uses existing vector store and only re-runs retrieve + score.
         """
         all_chunks: List[DocumentChunk] = []
-        if years is not None:
-            if company.source == "file" and company.path:
-                companies = []
-                years = set(years)
-                for p in Path(company.path).iterdir():
-                    yr = int("20" + p.stem.split('-')[1])
-                    if yr in years:
-                        companies.append(CompanyInput(company_id=f"{company.company_id}_{yr}", ticker=company.ticker, source=company.source, year=yr, path="/".join([company.path, p.stem]), cik=company.cik))
-            elif company.source == "edgar":
-                companies = [CompanyInput(company_id=f"{company.company_id}_{year}", ticker=company.ticker, source=company.source, year=year, path=company.path, cik=company.cik) for year in years]
+
+        base: Optional[Path] = None
+        if skip_index:
+            if not company.path:
+                raise ValueError("skip_index=True requires company.path to the filing base (…/10-K or …/10-Q).")
+            base = Path(company.path)
+        elif company.source == "edgar":
+            base = self._downloader.download(
+                company, limit=1, file_type=FILE_TYPE, years=years
+            )
+        elif company.source == "file" and company.path:
+            base = Path(company.path)
         else:
-            companies = [company]
-        
-        if not companies:
+            raise ValueError("Provide company.path (filing base dir) for source=file, or use source=edgar.")
+
+        year_filter: Optional[Set[int]]
+        if years is not None:
+            year_filter = set(years)
+        else:
+            year_filter = None
+
+        filings = self._filings_from_base(base, company, year_filter)
+
+        if not filings:
             return None
 
+        file_ids_to_retrieve: List[str] = []
         if not skip_index:
-            for company in companies:
-                chunks = self._load_and_chunk(company)
+            for filing in filings:
+                chunks, file_id_used = self._load_and_chunk(filing)
                 all_chunks.extend(chunks)
+                file_ids_to_retrieve.append(file_id_used)
+
             if all_chunks:
                 self._vector_store = VectorStore.build_from_chunks(
                     chunks=all_chunks,
                     persist_directory=self.persist_dir,
                 )
+        else:
+            # Skip indexing: require file_id to already exist in the vector store.
+            file_ids_to_retrieve = [f.file_id for f in filings if f.file_id]
+            if len(file_ids_to_retrieve) != len(filings):
+                raise ValueError("skip_index=True requires `file_id` for all filings.")
 
         if self._vector_store is None:
             self._vector_store = VectorStore.load(persist_directory=self.persist_dir)
@@ -67,10 +85,9 @@ class RTOPipeline:
         self._retriever = Retriever(vector_store=self._vector_store, top_k=TOP_K_RETRIEVAL)
         # self._analyzer = Analyzer()
         # results: List[CompanyRTOOutput] = []
-        ticker = companies[0].ticker
-        company_ids = list(set([c.company_id for c in companies]))
-        for company_id in company_ids:
-            context = self._retriever.get_rto_context(company.company_id, ticker)
+        ticker = filings[0].ticker
+        for file_id in sorted(set(file_ids_to_retrieve)):
+            context = self._retriever.get_rto_context(file_id, ticker)
             # score_result = self._analyzer.score_rto(name, cid, context)
             # results.append(CompanyRTOOutput(
             #     company_id=company.company_id,
@@ -80,25 +97,69 @@ class RTOPipeline:
             # ))
 
         # return results
-        print("finish processing ", company.ticker)
+        print("finish processing ", ticker)
         return None
     
 
     def _load_and_chunk(self, company: CompanyInput) -> Tuple[List[DocumentChunk], str]:
-        """Load 10-K and chunk according to company config. Returns (chunks, cid_used) so run() can use the same cid for retrieval."""
-        cid = company.company_id
-        name = company.ticker
-        filing_path: Optional[Path] = None
+        """Load one accession filing dir and chunk it. Returns (chunks, file_id_used)."""
+        if not company.path:
+            raise ValueError("Filing input must have path set to an accession directory.")
+        filing_path = Path(company.path)
+        file_id_used = company.file_id or filing_path.name
 
-        if company.source == "edgar":
-            filing_path = Path(self._downloader.download_10k(company))
-        elif company.source == "file" and company.path:
-            filing_path = Path(company.path)
+        chunks = self._preprocessor.load_and_chunk_dir(
+            filing_path,
+            file_id=file_id_used,
+            ticker=company.ticker,
+            file_type=company.file_type,
+        )
+        return chunks, file_id_used
 
-        if filing_path is not None:
-            chunks = self._preprocessor.load_and_chunk_dir(filing_path, cid, name)
-            return chunks
-        raise ValueError(f"Company {cid}: no filing path found")
+    def _year_from_accession_dir_name(self, name: str) -> Optional[int]:
+        """Map accession folder name like 0001543151-25-000008 to calendar year (e.g. 2025)."""
+        try:
+            parts = name.split("-")
+            if len(parts) < 2:
+                return None
+            yy = parts[1]
+            if len(yy) >= 2 and yy[:2].isdigit():
+                return int("20" + yy[:2])
+        except (ValueError, IndexError):
+            return None
+        return None
+
+
+    def _filings_from_base(
+        self,
+        base: Path,
+        template: CompanyInput,
+        year_filter: Optional[Set[int]],
+    ) -> List[CompanyInput]:
+        """List accession subdirs under a filing-type base (…/10-K or …/10-Q)."""
+        if not base.is_dir():
+            raise NotADirectoryError(f"Filing base is not a directory: {base}")
+
+        out: List[CompanyInput] = []
+        for p in sorted(base.iterdir()):
+            if not p.is_dir():
+                continue
+            yr = self._year_from_accession_dir_name(p.name)
+            if yr is None:
+                continue
+            if year_filter is not None and yr not in year_filter:
+                continue
+            out.append(
+                CompanyInput(
+                    ticker=template.ticker,
+                    source=template.source,
+                    path=str(p.resolve()),
+                    cik=template.cik,
+                    file_id=p.name,
+                    file_type=template.file_type,
+                )
+            )
+        return out
 
 def process_single_company_worker(company: CompanyInput, years: List[int]):
     pipeline = RTOPipeline()

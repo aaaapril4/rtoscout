@@ -53,8 +53,8 @@ class VectorStore:
             Document(
                 page_content=c.content,
                 metadata={
-                    "company_id": c.company_id,
-                    "company_name": c.company_name or c.company_id,
+                    "file_id": c.file_id,
+                    "ticker": c.ticker,
                     **c.metadata,
                 },
             )
@@ -79,8 +79,8 @@ class VectorStore:
             Document(
                 page_content=c.content,
                 metadata={
-                    "company_id": c.company_id,
-                    "company_name": c.company_name or c.company_id,
+                    "file_id": c.file_id,
+                    "ticker": c.ticker,
                     **c.metadata,
                 },
             )
@@ -103,8 +103,8 @@ class VectorStore:
         """Semantic similarity search."""
         return self._get_chroma().similarity_search(query, k=k, filter=filter or {})
 
-    def get_chunk_content(self, company_id: str, chunk_index: int) -> Optional[str]:
-        """Return page_content of the chunk with given company_id and chunk_index, or None if not found."""
+    def get_chunk_content(self, file_id: str, chunk_index: int) -> Optional[str]:
+        """Return page_content of the chunk with given file_id and chunk_index, or None if not found."""
         chroma = self._get_chroma()
         try:
             coll = getattr(chroma, "_collection", None) or getattr(chroma, "collection", None)
@@ -113,7 +113,7 @@ class VectorStore:
             result = coll.get(
                 where={
                     "$and": [
-                        {"company_id": company_id},
+                        {"file_id": file_id},
                         {"chunk_index": chunk_index}
                     ]
                 },
@@ -126,9 +126,9 @@ class VectorStore:
         except Exception:
             return None
 
-    def get_all_chunks_for_companies(self, company_ids: List[str]) -> List[dict[str, Any]]:
-        """Return all stored chunks for the given company_ids as list of dicts (content, company_id, company_name, metadata)."""
-        if not company_ids:
+    def get_all_chunks_for_files(self, file_ids: List[str]) -> List[dict[str, Any]]:
+        """Return all stored chunks for the given file_ids as list of dicts (content, file_id, ticker, metadata)."""
+        if not file_ids:
             return []
         chroma = self._get_chroma()
         try:
@@ -136,7 +136,7 @@ class VectorStore:
             if coll is None:
                 return []
             result = coll.get(
-                where={"company_id": {"$in": list(company_ids)}},
+                where={"file_id": {"$in": list(file_ids)}},
                 include=["documents", "metadatas"],
             )
             documents = result.get("documents") or []
@@ -149,9 +149,9 @@ class VectorStore:
                     content = content[0] if content else ""
                 out.append({
                     "content": content or "",
-                    "company_id": meta.get("company_id", ""),
-                    "company_name": meta.get("company_name"),
-                    "metadata": {k: v for k, v in meta.items() if k not in ("company_id", "company_name")},
+                    "file_id": meta.get("file_id"),
+                    "ticker": meta.get("ticker"),
+                    "metadata": {k: v for k, v in meta.items() if k not in ("file_id", "ticker")},
                 })
             return out
         except Exception:

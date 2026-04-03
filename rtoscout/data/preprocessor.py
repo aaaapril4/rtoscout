@@ -1,4 +1,4 @@
-"""Clean HTML, extract text, and chunk 10-K content."""
+"""Clean HTML, extract text, and chunk 10-K/10-Q content."""
 from pathlib import Path
 from typing import Optional
 import re
@@ -10,7 +10,7 @@ from ..schemas.models import DocumentChunk
 
 
 class Preprocessor:
-    """10-K text cleaning and chunking."""
+    """10-K/10-Q HTML text cleaning and chunking."""
 
     def __init__(self) -> None:
         pass
@@ -32,7 +32,7 @@ class Preprocessor:
 
     def extract_fiscal_year_from_document(self, soup: BeautifulSoup) -> Optional[int]:
         """
-        Extract the document period end year from the 10-K HTML.
+        Extract the document period end year from the 10-K/10-Q HTML.
         Looks for the inline XBRL block with name="dei:DocumentPeriodEndDate"
         (content is typically "Month DD, YYYY"). Returns the 4-digit year or None.
         """
@@ -181,17 +181,14 @@ class Preprocessor:
         paragraphs = [p for p in paragraphs if not p.strip().lower().replace(" ", "").startswith("<hr")]
         return paragraphs, year
 
-    def _normalize_whitespace(self, text: str) -> str:
-        """Strip lines and drop empty; keep one newline between lines."""
-        return "\n".join(line.strip() for line in text.splitlines() if line.strip())
-
     def load_and_chunk_file(
         self,
         path: str | Path,
-        company_id: str,
-        company_name: str,
+        file_id: str,
+        ticker: str,
+        file_type: str
     ) -> list[DocumentChunk]:
-        """Read file and chunk: HTML by div/span, plain text by double newline."""
+        """Read file and chunk: HTML by div/span."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -203,29 +200,34 @@ class Preprocessor:
             return [
                 DocumentChunk(
                     content=p,
-                    company_id=company_id,
-                    company_name=company_name,
+                    file_id=file_id,
+                    ticker=ticker,
                     metadata={
                         "chunk_index": i,
                         **({"source_url": source_url} if source_url else {}),
                         **({"year": year} if year else {}),
-                        **({"company_name": company_name} if company_name else {}),
+                        **({"file_type": file_type} if file_type else {}),
                     },
                 )
                 for i, p in enumerate(paragraphs)
             ]
-        text = self._normalize_whitespace(raw)
-        return self.chunk(text, company_id, company_name, year=year)
+        raise NotImplementedError(f"Unsupported filing format: {path.suffix}")
 
     def load_and_chunk_dir(
         self,
         dir_path: str | Path,
-        company_id: str,
-        company_name: str,
+        file_id: str,
+        ticker: str,
+        file_type: str
     ) -> list[DocumentChunk]:
         """Read primary HTML in directory and chunk by div/span."""
         dir_path = Path(dir_path)
         if not dir_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {dir_path}")
         primary = self._find_primary_html(dir_path)
-        return self.load_and_chunk_file(primary, company_id, company_name)
+        return self.load_and_chunk_file(
+            primary,
+            file_id=file_id,
+            ticker=ticker,
+            file_type=file_type
+        )

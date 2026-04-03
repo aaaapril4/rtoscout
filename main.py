@@ -15,7 +15,6 @@ for item in company_data.values():
     if cik not in cik_set:
         comp = CompanyInput(
             ticker=item['ticker'],
-            company_id=item['ticker'],
             cik=str(item['cik_str']).zfill(10),
             source="file"
         )
