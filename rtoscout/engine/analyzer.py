@@ -10,14 +10,14 @@ from ..config import OLLAMA_BASE_URL, OLLAMA_MODEL, SCORE_MAX, SCORE_MIN
 from ..schemas.models import RTOScoreResult
 
 
-SYSTEM_PROMPT = """You are an analyst scoring companies' Return-to-Office (RTO) stance based on their 10-K filing excerpts.
+SYSTEM_PROMPT = """You are an analyst scoring companies' Return-to-Office (RTO) stance based on their filing excerpts.
 
 Score from 0 to 10:
-- 0: No mention of RTO / fully remote / flexible work emphasized; no office requirement.
+- 10: No mention of RTO / fully remote / flexible work emphasized; no office requirement.
 - 5: Hybrid or mixed; some in-person expectations; flexible or voluntary.
-- 10: Strict mandatory return to office; explicit in-person requirement; minimal remote allowance.
+- 0: Strict mandatory return to office; explicit in-person requirement; minimal remote allowance.
 
-Use ONLY the provided excerpts from the 10-K. If the excerpts contain little or no RTO/workplace language, score low and say so in the rationale.
+Use ONLY the provided excerpts from the files. If the excerpts contain little or no RTO/workplace language, score low and say so in the rationale.
 Output ONLY valid JSON with keys "score" (integer 0-10) and "rationale" (string). No other text."""
 
 

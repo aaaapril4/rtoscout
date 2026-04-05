@@ -27,21 +27,15 @@ class RTOPipeline:
     def run(
         self,
         company: CompanyInput,
-        years: List[int] = None,
-        skip_index: bool = False,
+        years: List[int] = None
     ) -> List[CompanyRTOOutput]:
         """
         Full pipeline: download/read → clean & chunk → index → retrieve → LLM score for one company.
-        skip_index=True uses existing vector store and only re-runs retrieve + score.
         """
         all_chunks: List[DocumentChunk] = []
 
         base: Optional[Path] = None
-        if skip_index:
-            if not company.path:
-                raise ValueError("skip_index=True requires company.path to the filing base (…/10-K or …/10-Q).")
-            base = Path(company.path)
-        elif company.source == "edgar":
+        if company.source == "edgar":
             base = self._downloader.download(
                 company, limit=1, file_type=FILE_TYPE, years=years
             )
@@ -62,22 +56,16 @@ class RTOPipeline:
             return None
 
         file_ids_to_retrieve: List[str] = []
-        if not skip_index:
-            for filing in filings:
-                chunks, file_id_used = self._load_and_chunk(filing)
-                all_chunks.extend(chunks)
-                file_ids_to_retrieve.append(file_id_used)
+        for filing in filings:
+            chunks, file_id_used = self._load_and_chunk(filing)
+            all_chunks.extend(chunks)
+            file_ids_to_retrieve.append(file_id_used)
 
-            if all_chunks:
-                self._vector_store = VectorStore.build_from_chunks(
-                    chunks=all_chunks,
-                    persist_directory=self.persist_dir,
-                )
-        else:
-            # Skip indexing: require file_id to already exist in the vector store.
-            file_ids_to_retrieve = [f.file_id for f in filings if f.file_id]
-            if len(file_ids_to_retrieve) != len(filings):
-                raise ValueError("skip_index=True requires `file_id` for all filings.")
+        if all_chunks:
+            self._vector_store = VectorStore.build_from_chunks(
+                chunks=all_chunks,
+                persist_directory=self.persist_dir,
+            )
 
         if self._vector_store is None:
             self._vector_store = VectorStore.load(persist_directory=self.persist_dir)

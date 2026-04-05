@@ -30,7 +30,7 @@ class Preprocessor:
         except (ValueError, IndexError, TypeError):
             return None
 
-    def extract_fiscal_year_from_document(self, soup: BeautifulSoup) -> Optional[int]:
+    def extract_fiscal_year_from_document(self, soup: BeautifulSoup, file_type: str) -> Optional[int]:
         """
         Extract the document period end year from the 10-K/10-Q HTML.
         Looks for the inline XBRL block with name="dei:DocumentPeriodEndDate"
@@ -55,8 +55,10 @@ class Preprocessor:
                 if year:
                     return year
 
-            keyword = r"For\s+(?:[Tt]he\s+)?(?:[Ff]iscal\s+)?(?:[Yy]ear|[Pp]eriod)\s+[Ee]nded[\s\S]*?(\d{4})"
-
+            if file_type == "10-K":
+                keyword = r"for\s+(?:the\s+)?(?:fiscal\s+)?(?:year|period)\s+ended[\s\S]*?(\d{4})"
+            elif file_type == "10-Q":
+                keyword = r"for\s+(?:the\s+)?(?:(?:fiscal|quarterly)\s+)?(?:year|period|quarter)\s+ended[\s\S]*?(\d{4})"
             tagList = ['p', 'span', 'font', 'b', 'tr', 'div']
             el = soup.find(lambda tag: (
                             tag.name in tagList and
@@ -65,6 +67,7 @@ class Preprocessor:
             ))
             year = extract_year(el)
             if year:
+                print(el.get_text())
                 return year
         except Exception:
             pass
@@ -145,7 +148,7 @@ class Preprocessor:
         return merged
 
 
-    def _extract_paragraphs_from_html(self, html: str) -> list[str]:
+    def _extract_paragraphs_from_html(self, html: str, file_type: str) -> list[str]:
         """
         Extract one paragraph per <div> or <span> in document order.
 
@@ -157,7 +160,7 @@ class Preprocessor:
         """
         soup = BeautifulSoup(html, "html.parser")
 
-        year = self.extract_fiscal_year_from_document(soup)
+        year = self.extract_fiscal_year_from_document(soup, file_type)
 
         for tag in soup(["script", "style"]):
             tag.decompose()
@@ -195,7 +198,7 @@ class Preprocessor:
         raw = path.read_text(encoding="utf-8", errors="replace")
         source_url = self._sec_archives_url_from_path(path)
         if path.suffix.lower() in (".html", ".htm"):
-            paragraphs, year = self._extract_paragraphs_from_html(raw)
+            paragraphs, year = self._extract_paragraphs_from_html(raw, file_type)
             paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
             return [
                 DocumentChunk(

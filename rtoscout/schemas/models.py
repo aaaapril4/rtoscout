@@ -3,18 +3,16 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from ..config import FILE_TYPE
-
 
 class CompanyInput(BaseModel):
     """Single company input for download or local file."""
 
     ticker: str = Field(..., description="Ticker")
     source: Literal["file", "edgar"] = "edgar"
+    file_type: Literal["10-K", "10-Q"] = "10-K"
     path: Optional[str] = Field(None, description="Local 10-K/10-Q path when source=file")
     cik: Optional[str] = None
     file_id: Optional[str] = Field(None, description="Filing identifier")
-    file_type: str = Field(default=FILE_TYPE, description="SEC filing form, e.g. 10-K or 10-Q")
 
 
 class DocumentChunk(BaseModel):
