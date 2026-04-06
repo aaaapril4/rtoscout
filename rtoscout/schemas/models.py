@@ -9,7 +9,7 @@ class CompanyInput(BaseModel):
 
     ticker: str = Field(..., description="Ticker")
     source: Literal["file", "edgar"] = "edgar"
-    file_type: Literal["10-K", "10-Q"] = "10-K"
+    file_type: Literal["10-K", "10-Q", "BOTH"] = "10-K"
     path: Optional[str] = Field(None, description="Local 10-K/10-Q path when source=file")
     cik: Optional[str] = None
     file_id: Optional[str] = Field(None, description="Filing identifier")

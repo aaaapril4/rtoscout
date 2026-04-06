@@ -6,7 +6,7 @@ from pathlib import Path
 from tqdm import tqdm
 from typing import List, Optional, Set, Tuple
 
-from .config import CHROMA_PERSIST_DIR, DATA_DIR, FILE_TYPE, TOP_K_RETRIEVAL
+from .config import CHROMA_PERSIST_DIR, DATA_DIR, TOP_K_RETRIEVAL
 from .data.preprocessor import Preprocessor
 from .data.sec_downloader import SecDownloader
 # from .engine.analyzer import Analyzer
@@ -37,7 +37,7 @@ class RTOPipeline:
         base: Optional[Path] = None
         if company.source == "edgar":
             base = self._downloader.download(
-                company, limit=1, file_type=FILE_TYPE, years=years
+                company, limit=1, file_type=company.file_type, years=years
             )
         elif company.source == "file" and company.path:
             base = Path(company.path)
@@ -50,7 +50,7 @@ class RTOPipeline:
         else:
             year_filter = None
 
-        filings = self._filings_from_base(base, company, year_filter)
+        filings = self._filings_from_base(base, company, year_filter, company.file_type)
 
         if not filings:
             return None
@@ -75,7 +75,7 @@ class RTOPipeline:
         # results: List[CompanyRTOOutput] = []
         ticker = filings[0].ticker
         for file_id in sorted(set(file_ids_to_retrieve)):
-            context = self._retriever.get_rto_context(file_id, ticker)
+            context = self._retriever.get_rto_context(file_id, ticker, company.file_type)
             # score_result = self._analyzer.score_rto(name, cid, context)
             # results.append(CompanyRTOOutput(
             #     company_id=company.company_id,
@@ -118,13 +118,15 @@ class RTOPipeline:
         return None
 
 
-    def _filings_from_base(
+    def _filings_from_base_helper(
         self,
         base: Path,
         template: CompanyInput,
         year_filter: Optional[Set[int]],
+        file_type: str,
     ) -> List[CompanyInput]:
         """List accession subdirs under a filing-type base (…/10-K or …/10-Q)."""
+        base = base / file_type
         if not base.is_dir():
             raise NotADirectoryError(f"Filing base is not a directory: {base}")
 
@@ -144,10 +146,22 @@ class RTOPipeline:
                     path=str(p.resolve()),
                     cik=template.cik,
                     file_id=p.name,
-                    file_type=template.file_type,
+                    file_type=file_type,
                 )
             )
         return out
+    
+    def _filings_from_base(
+        self,
+        base: Path,
+        template: CompanyInput,
+        year_filter: Optional[Set[int]],
+        file_type: str,
+    ) -> List[CompanyInput]:
+        if file_type == "BOTH":
+            return self._filings_from_base_helper(base, template, year_filter, "10-K") + self._filings_from_base_helper(base, template, year_filter, "10-Q")
+        else:
+            return self._filings_from_base_helper(base, template, year_filter, file_type)
 
 def process_single_company_worker(company: CompanyInput, years: List[int]):
     pipeline = RTOPipeline()

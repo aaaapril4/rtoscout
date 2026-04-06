@@ -37,20 +37,15 @@ class SecDownloader:
         if cik is None:
             cik = self._ticker_to_cik(ticker)
         return str(cik).zfill(10)
-
-    def download(
+    
+    def _download_helper(
         self,
-        company: CompanyInput,
+        years: Optional[List[int]],
+        file_type: str,
+        cik: str,
         limit: int = 1,
-        file_type: str = "10-K",
-        years: List[int] = None,
-    ) -> Path:
-        """
-        Download one batch of 10-K/10-Q for the given company (ticker or cik).
-        """
-        self._get_downloader()
-        cik = self._resolve_cik(company)
-        if company.year is not None:
+    ) -> None:
+        if years is not None:
             after = f"{min(years)}-01-01"
             before = f"{max(years)}-12-31"
             self._downloader.get(
@@ -60,7 +55,26 @@ class SecDownloader:
             )
         else:
             self._downloader.get(file_type, cik, limit=limit, download_details=True)
-        return self.download_dir / "sec-edgar-filings" / cik / file_type
+        return
+
+    def download(
+        self,
+        company: CompanyInput,
+        limit: int = 1,
+        file_type: str = "10-K",
+        years: Optional[List[int]] = None,
+    ) -> Path:
+        """
+        Download one batch of 10-K/10-Q for the given company (ticker or cik).
+        """
+        self._get_downloader()
+        cik = self._resolve_cik(company)
+        if file_type == "BOTH":
+            for ft in ["10-K", "10-Q"]:
+                self._download_helper(years, ft, cik, limit)
+        else:
+            self._download_helper(years, file_type, cik, limit)
+        return self.download_dir / "sec-edgar-filings" / cik
     
     def _ticker_to_cik(self, ticker: str) -> str:
         import requests

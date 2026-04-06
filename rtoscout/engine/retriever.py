@@ -7,7 +7,6 @@ from ..config import (
     RTO_QUERY_GROUP_B,
     TOP_K_RETRIEVAL,
     MIN_CHUNK_LENGTH,
-    FILE_TYPE
 )
 from ..index.vector_store import VectorStore
 
@@ -37,6 +36,7 @@ class Retriever:
         file_id: str,
         ticker: str,
         context: str,
+        file_type: str,
     ) -> None:
         """Write one context file per filing (file_id), including the SEC source URL."""
         if not context:
@@ -51,7 +51,7 @@ class Retriever:
             if source_url:
                 break
 
-        out_dir = DATA_DIR / "rto_outputs" / FILE_TYPE
+        out_dir = DATA_DIR / "rto_outputs" / file_type
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / f"{ticker}_{year}_{file_id}.txt"
 
@@ -67,6 +67,7 @@ class Retriever:
         self,
         file_id: str,
         ticker: str,
+        file_type: str,
     ) -> str:
         """
         Retrieve RTO-related context via two-pass semantic search.
@@ -127,5 +128,5 @@ class Retriever:
             prev = i
             
         context = "\n\n---\n\n".join(block_parts) if block_parts else ""
-        self._save_company_context(file_id, ticker, context)
-        return block_parts
+        self._save_company_context(file_id, ticker, context, file_type)
+        return context
