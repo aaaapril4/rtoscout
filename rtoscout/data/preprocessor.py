@@ -58,7 +58,7 @@ class Preprocessor:
             if file_type == "10-K":
                 keyword = r"for\s+(?:the\s+)?(?:fiscal\s+)?(?:year|period)\s+ended[\s\S]*?(\d{4})"
             elif file_type == "10-Q":
-                keyword = r"for\s+(?:the\s+)?(?:(?:fiscal|quarterly)\s+)?(?:year|period|quarter)\s+ended[\s\S]*?(\d{4})"
+                keyword = r"for\s+(?:the\s+)?(?:(?:fiscal|quarterly)\s+)?(?:period|quarter)\s+ended[\s\S]*?(\d{4})"
             tagList = ['p', 'span', 'font', 'b', 'tr', 'div']
             el = soup.find(lambda tag: (
                             tag.name in tagList and
@@ -67,7 +67,6 @@ class Preprocessor:
             ))
             year = extract_year(el)
             if year:
-                print(el.get_text())
                 return year
         except Exception:
             pass

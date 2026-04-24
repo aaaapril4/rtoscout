@@ -55,11 +55,11 @@ class RTOPipeline:
         if not filings:
             return None
 
-        file_ids_to_retrieve: List[str] = []
+        file_ids_to_retrieve: dict = {}
         for filing in filings:
             chunks, file_id_used = self._load_and_chunk(filing)
             all_chunks.extend(chunks)
-            file_ids_to_retrieve.append(file_id_used)
+            file_ids_to_retrieve[file_id_used] = filing.file_type
 
         if all_chunks:
             self._vector_store = VectorStore.build_from_chunks(
@@ -74,8 +74,8 @@ class RTOPipeline:
         # self._analyzer = Analyzer()
         # results: List[CompanyRTOOutput] = []
         ticker = filings[0].ticker
-        for file_id in sorted(set(file_ids_to_retrieve)):
-            context = self._retriever.get_rto_context(file_id, ticker, company.file_type)
+        for file_id, file_type in file_ids_to_retrieve.items():
+            context = self._retriever.get_rto_context(file_id, ticker, file_type)
             # score_result = self._analyzer.score_rto(name, cid, context)
             # results.append(CompanyRTOOutput(
             #     company_id=company.company_id,
