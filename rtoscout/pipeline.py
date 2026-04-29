@@ -28,7 +28,7 @@ class RTOPipeline:
         self,
         company: CompanyInput,
         years: List[int] = None
-    ) -> List[CompanyRTOOutput]:
+    ) -> Tuple[List[CompanyRTOOutput], List[dict]]:
         """
         Full pipeline: download/read → clean & chunk → index → retrieve → LLM score for one company.
         """
@@ -53,7 +53,7 @@ class RTOPipeline:
         filings = self._filings_from_base(base, company, year_filter, company.file_type)
 
         if not filings:
-            return None
+            return [], []
 
         file_ids_to_retrieve: dict = {}
         for filing in filings:
@@ -72,10 +72,13 @@ class RTOPipeline:
 
         self._retriever = Retriever(vector_store=self._vector_store, top_k=TOP_K_RETRIEVAL)
         # self._analyzer = Analyzer()
-        # results: List[CompanyRTOOutput] = []
+        results: List[CompanyRTOOutput] = []
         ticker = filings[0].ticker
+        chunks = []
         for file_id, file_type in file_ids_to_retrieve.items():
-            context = self._retriever.get_rto_context(file_id, ticker, file_type)
+            _, chunk_rows = self._retriever.get_rto_context(file_id, ticker, file_type)
+            if chunk_rows:
+                chunks.extend(chunk_rows)
             # score_result = self._analyzer.score_rto(name, cid, context)
             # results.append(CompanyRTOOutput(
             #     company_id=company.company_id,
@@ -84,9 +87,8 @@ class RTOPipeline:
             #     rationale=score_result.rationale,
             # ))
 
-        # return results
         print("finish processing ", ticker)
-        return None
+        return results, chunks
     
 
     def _load_and_chunk(self, company: CompanyInput) -> Tuple[List[DocumentChunk], str]:
@@ -169,12 +171,11 @@ def process_single_company_worker(company: CompanyInput, years: List[int]):
     pipeline.persist_dir = temp_persist_dir
     
     try:
-        pipeline.run(company, years)
-        return
+        return pipeline.run(company, years)
 
     except Exception as e:
         print(f"[!] Error processing {company.ticker}: {str(e)}")
-        return
+        return [], []
 
     finally:
         if hasattr(pipeline, "_vector_store") and pipeline._vector_store:
@@ -200,7 +201,8 @@ def run_pipeline(
 ):
 
     total_tasks = len(companies)
-    all_final_results = []
+    all_final_results: List[CompanyRTOOutput] = []
+    all_chunks: List[dict] = []
 
     with tqdm(total=total_tasks, desc="Analyzing RTO", unit="company") as pbar:
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -212,12 +214,14 @@ def run_pipeline(
             for future in concurrent.futures.as_completed(future_to_company):
                 comp = future_to_company[future]
                 try:
-                    data = future.result()
-                    if data:
-                        all_final_results.extend(data)
+                    results, chunk_rows = future.result()
+                    if results:
+                        all_final_results.extend(results)
+                    if chunk_rows:
+                        all_chunks.extend(chunk_rows)
                     pbar.set_postfix({"last_finished": comp})
                 except Exception as e:
                     tqdm.write(f"\n[!] {comp} failed: {e}")
                 pbar.update(1)
 
-    return all_final_results
+    return all_final_results, all_chunks

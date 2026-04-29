@@ -2,7 +2,6 @@
 from typing import Dict, List, Optional, Set
 
 from ..config import (
-    DATA_DIR,
     RTO_QUERY_GROUP_A,
     RTO_QUERY_GROUP_B,
     TOP_K_RETRIEVAL,
@@ -31,44 +30,40 @@ class Retriever:
         self._queries_a = group_a or RTO_QUERY_GROUP_A
         self._queries_b = group_b or RTO_QUERY_GROUP_B
 
-    def _save_company_context(
+    def _build_company_chunks(
         self,
         file_id: str,
         ticker: str,
-        context: str,
         file_type: str,
-    ) -> None:
-        """Write one context file per filing (file_id), including the SEC source URL."""
-        if not context:
-            return
-
-        source_url = None
+        block_parts: List[str],
+    ) -> List[Dict[str, object]]:
+        """Build one row per text block for batch writing."""
         rows = self.vector_store.get_all_chunks_for_files([file_id])
-        for row in rows:
-            meta = row.get("metadata") or {}
-            source_url = meta.get("source_url")
-            year = meta.get("year")
-            if source_url:
-                break
+        filing_meta = next(((r.get("metadata") or {}) for r in rows if (r.get("metadata") or {})), {})
+        blocks: List[Dict[str, object]] = []
+        for part in block_parts:
+            content = (part or "").strip()
+            if not content:
+                continue
 
-        out_dir = DATA_DIR / "rto_outputs" / file_type
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / f"{ticker}_{year}_{file_id}.txt"
-
-        with out_file.open("w", encoding="utf-8") as f:
-            f.write(f"ticker: {ticker}\n")
-            f.write(f"year: {year}\n")
-            if source_url:
-                f.write(f"source_url: {source_url}\n")
-            f.write("\n==== Retrieved Context ====\n\n")
-            f.write(context)
+            blocks.append(
+                {
+                    "file_type": file_type,
+                    "file_id": file_id,
+                    "ticker": ticker,
+                    "year": filing_meta.get("year"),
+                    "source_url": filing_meta.get("source_url"),
+                    "content": content,
+                }
+            )
+        return blocks
 
     def get_rto_context(
         self,
         file_id: str,
         ticker: str,
         file_type: str,
-    ) -> str:
+    ) -> tuple[str, List[Dict[str, object]]]:
         """
         Retrieve RTO-related context via two-pass semantic search.
         """
@@ -85,7 +80,7 @@ class Retriever:
                     hits_a_indices.add(int(idx))
 
         if not hits_a_indices:
-            return ""
+            return "", []
 
         coverage_zone: Set[int] = set()
         for idx in hits_a_indices:
@@ -108,7 +103,7 @@ class Retriever:
                         hit_indices.add(chunk_idx + 1) 
         
         if not hit_indices:
-            return ""
+            return "", []
 
         sorted_indices = sorted(list(hit_indices))
         block_parts = []
@@ -126,7 +121,10 @@ class Retriever:
                 block_parts[-1] += "\n\n" + p
             
             prev = i
-            
+
+        chunk_rows = self._build_company_chunks(file_id, ticker, file_type, block_parts)
+        if not chunk_rows:
+            return "", []
+
         context = "\n\n---\n\n".join(block_parts) if block_parts else ""
-        self._save_company_context(file_id, ticker, context, file_type)
-        return context
+        return context, chunk_rows
