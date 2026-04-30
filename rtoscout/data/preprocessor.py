@@ -212,7 +212,7 @@ class Preprocessor:
                     },
                 )
                 for i, p in enumerate(paragraphs)
-            ]
+            ], year
         raise NotImplementedError(f"Unsupported filing format: {path.suffix}")
 
     def load_and_chunk_dir(

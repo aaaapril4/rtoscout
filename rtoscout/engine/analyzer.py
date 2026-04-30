@@ -10,15 +10,22 @@ from ..config import OLLAMA_BASE_URL, OLLAMA_MODEL, SCORE_MAX, SCORE_MIN
 from ..schemas.models import RTOScoreResult
 
 
-SYSTEM_PROMPT = """You are an analyst scoring companies' Return-to-Office (RTO) stance based on their filing excerpts.
+SYSTEM_PROMPT = """You are an analyst scoring companies' Return-to-Office (RTO) flexibility based on filing excerpts.
 
-Score from 0 to 10:
-- 10: No mention of RTO / fully remote / flexible work emphasized; no office requirement.
-- 5: Hybrid or mixed; some in-person expectations; flexible or voluntary.
-- 0: Strict mandatory return to office; explicit in-person requirement; minimal remote allowance.
+Score from 0 to 10 (higher = more remote/flexible, lower = stricter in-office requirement):
+- 0-2: Strict mandatory return-to-office with explicit in-person requirements.
+- 3-4: Office-forward; clear attendance expectations and stronger in-person norms.
+- 5-6: Balanced hybrid; recurring in-office expectation for many roles.
+- 7-8: Flexible hybrid; office presence encouraged but mostly optional.
+- 9-10: Remote-first / highly flexible; no meaningful office mandate.
 
-Use ONLY the provided excerpts from the files. If the excerpts contain little or no RTO/workplace language, score low and say so in the rationale.
-Output ONLY valid JSON with keys "score" (integer 0-10) and "rationale" (string). No other text."""
+Calibration guidance:
+- If language is explicit and directive (for example: "required", "must", "expected to be in office"), score lower.
+- If language is optional/employee-choice focused (for example: "flexible", "may work remotely"), score higher.
+- If evidence is mixed, prefer middle values (4-7) and explain the tradeoff.
+- If excerpts contain little or no workplace policy language, return a conservative mid score (typically 4-6), and explain uncertainty.
+
+Use ONLY the provided excerpts. Output ONLY valid JSON with keys "score" (integer 0-10) and "rationale" (string). No other text."""
 
 
 class Analyzer:
@@ -46,8 +53,7 @@ class Analyzer:
 
     def score_rto(
         self,
-        company_name: str,
-        company_id: str,
+        ticker: str,
         context: str,
     ) -> RTOScoreResult:
         """Score the company from RTO context and return rationale."""
@@ -57,11 +63,11 @@ class Analyzer:
                 rationale="No RTO-related context found in the provided 10-K excerpts.",
             )
 
-        user_content = f"""Company: {company_name} (id: {company_id})
+        user_content = f"""Company: {ticker}
 
 Excerpts from 10-K (RTO/workplace related):
 
-{context[:12000]}
+{context}
 
 Provide the JSON score and rationale."""
 
@@ -89,18 +95,18 @@ Provide the JSON score and rationale."""
             if end > start:
                 try:
                     obj = json.loads(text[start:end])
-                    score = int(obj.get("score", 0))
+                    score = float(obj.get("score", 0))
                     score = max(SCORE_MIN, min(SCORE_MAX, score))
                     return RTOScoreResult(
                         score=score,
                         rationale=obj.get("rationale", "No rationale provided."),
                     )
-                except (json.JSONDecodeError, TypeError):
+                except (json.JSONDecodeError, TypeError, ValueError):
                     pass
-        score_m = re.search(r'"score"\s*:\s*(\d+)', text)
+        score_m = re.search(r'"score"\s*:\s*(\d+(?:\.\d+)?)', text)
         rationale_m = re.search(r'"rationale"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
         if score_m:
-            score = max(SCORE_MIN, min(SCORE_MAX, int(score_m.group(1))))
+            score = max(SCORE_MIN, min(SCORE_MAX, float(score_m.group(1))))
             rationale = rationale_m.group(1).replace("\\n", "\n").replace('\\"', '"') if rationale_m else "No rationale provided."
             return RTOScoreResult(score=score, rationale=rationale)
         raise ValueError(f"Could not parse score from LLM response: {text[:500]}")

@@ -9,7 +9,7 @@ from typing import List, Optional, Set, Tuple
 from .config import CHROMA_PERSIST_DIR, DATA_DIR, TOP_K_RETRIEVAL
 from .data.preprocessor import Preprocessor
 from .data.sec_downloader import SecDownloader
-# from .engine.analyzer import Analyzer
+from .engine.analyzer import Analyzer
 from .engine.retriever import Retriever
 from .index.vector_store import VectorStore
 from .schemas.models import CompanyInput, CompanyRTOOutput, DocumentChunk
@@ -23,6 +23,7 @@ class RTOPipeline:
         self.download_dir = Path(DATA_DIR / "sec_filings")
         self._preprocessor = Preprocessor()
         self._downloader = SecDownloader(download_dir=self.download_dir)
+        self._vector_store = None
 
     def run(
         self,
@@ -57,9 +58,14 @@ class RTOPipeline:
 
         file_ids_to_retrieve: dict = {}
         for filing in filings:
-            chunks, file_id_used = self._load_and_chunk(filing)
+            chunks, year, file_id_used = self._load_and_chunk(filing)
+            if year_filter and year not in year_filter:
+                continue
             all_chunks.extend(chunks)
             file_ids_to_retrieve[file_id_used] = filing.file_type
+
+        if not file_ids_to_retrieve:
+            return [], []
 
         if all_chunks:
             self._vector_store = VectorStore.build_from_chunks(
@@ -71,40 +77,44 @@ class RTOPipeline:
             self._vector_store = VectorStore.load(persist_directory=self.persist_dir)
 
         self._retriever = Retriever(vector_store=self._vector_store, top_k=TOP_K_RETRIEVAL)
-        # self._analyzer = Analyzer()
+        self._analyzer = Analyzer()
         results: List[CompanyRTOOutput] = []
         ticker = filings[0].ticker
         chunks = []
+        contexts: List[str] = []
         for file_id, file_type in file_ids_to_retrieve.items():
-            _, chunk_rows = self._retriever.get_rto_context(file_id, ticker, file_type)
+            context, chunk_rows = self._retriever.get_rto_context(file_id, ticker, file_type)
+            if context:
+                contexts.append(context)
             if chunk_rows:
                 chunks.extend(chunk_rows)
-            # score_result = self._analyzer.score_rto(name, cid, context)
-            # results.append(CompanyRTOOutput(
-            #     company_id=company.company_id,
-            #     company_name=name,
-            #     rto_score=score_result.score,
-            #     rationale=score_result.rationale,
-            # ))
+
+        combined_context = "\n\n---\n\n".join(contexts) if contexts else ""
+        score_result = self._analyzer.score_rto(ticker, combined_context)
+        results.append(CompanyRTOOutput(
+            ticker=ticker,
+            rto_score=score_result.score,
+            rationale=score_result.rationale,
+        ))
 
         print("finish processing ", ticker)
         return results, chunks
     
 
-    def _load_and_chunk(self, company: CompanyInput) -> Tuple[List[DocumentChunk], str]:
-        """Load one accession filing dir and chunk it. Returns (chunks, file_id_used)."""
+    def _load_and_chunk(self, company: CompanyInput) -> Tuple[List[DocumentChunk], int, str]:
+        """Load one accession filing dir and chunk it. Returns (chunks, year, file_id_used)."""
         if not company.path:
             raise ValueError("Filing input must have path set to an accession directory.")
         filing_path = Path(company.path)
         file_id_used = company.file_id or filing_path.name
 
-        chunks = self._preprocessor.load_and_chunk_dir(
+        chunks, year = self._preprocessor.load_and_chunk_dir(
             filing_path,
             file_id=file_id_used,
             ticker=company.ticker,
             file_type=company.file_type,
         )
-        return chunks, file_id_used
+        return chunks, year, file_id_used
 
     def _year_from_accession_dir_name(self, name: str) -> Optional[int]:
         """Map accession folder name like 0001543151-25-000008 to calendar year (e.g. 2025)."""

@@ -27,14 +27,13 @@ class DocumentChunk(BaseModel):
 class RTOScoreResult(BaseModel):
     """RTO score result."""
 
-    score: int = Field(ge=0, le=10, description="RTO strictness 0-10")
+    score: float = Field(ge=0, le=10, description="RTO flexibility 0-10 (higher is more remote/flexible)")
     rationale: str = Field(..., description="Score rationale")
 
 
 class CompanyRTOOutput(BaseModel):
     """RTO analysis output for one company."""
 
-    file_id: str
     ticker: str
-    rto_score: int = Field(ge=0, le=10)
+    rto_score: float = Field(ge=0, le=10)
     rationale: str
