@@ -86,7 +86,7 @@ class RTOPipeline:
             except:
                 pass
         
-        return combined_context, chunk_rows, ticker
+        return combined_context, chunks, ticker
 
     def score_context(self, ticker: str, context: str) -> CompanyRTOOutput:
         """

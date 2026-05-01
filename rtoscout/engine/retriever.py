@@ -1,4 +1,5 @@
 """Hybrid search: semantic multi-query over RTO-related terms."""
+import re
 from typing import Dict, List, Optional, Set
 
 from ..config import (
@@ -42,7 +43,7 @@ class Retriever:
         filing_meta = next(((r.get("metadata") or {}) for r in rows if (r.get("metadata") or {})), {})
         blocks: List[Dict[str, object]] = []
         for part in block_parts:
-            content = (part or "").strip()
+            content = re.sub(r"\s+", " ", (part or "")).strip()
             if not content:
                 continue
 
