@@ -189,8 +189,8 @@ class Preprocessor:
         file_id: str,
         ticker: str,
         file_type: str
-    ) -> list[DocumentChunk]:
-        """Read file and chunk: HTML by div/span."""
+    ) -> tuple[list[DocumentChunk], Optional[int]]:
+        """Read file and chunk: HTML by div/span. Returns (chunks, fiscal year or None)."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -221,7 +221,7 @@ class Preprocessor:
         file_id: str,
         ticker: str,
         file_type: str
-    ) -> list[DocumentChunk]:
+    ) -> tuple[list[DocumentChunk], Optional[int]]:
         """Read primary HTML in directory and chunk by div/span."""
         dir_path = Path(dir_path)
         if not dir_path.is_dir():

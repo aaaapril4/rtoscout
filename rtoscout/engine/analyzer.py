@@ -6,26 +6,20 @@ from typing import Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from ..config import OLLAMA_BASE_URL, OLLAMA_MODEL, SCORE_MAX, SCORE_MIN
+from ..config import (
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    RTO_SCORING_SYSTEM_PROMPT,
+    SCORE_MAX,
+    SCORE_MIN,
+)
 from ..schemas.models import RTOScoreResult
 
 
-SYSTEM_PROMPT = """You are an analyst scoring companies' Return-to-Office (RTO) flexibility based on filing excerpts.
-
-Score from 0 to 10 (higher = more remote/flexible, lower = stricter in-office requirement):
-- 0-2: Strict mandatory return-to-office with explicit in-person requirements.
-- 3-4: Office-forward; clear attendance expectations and stronger in-person norms.
-- 5-6: Balanced hybrid; recurring in-office expectation for many roles.
-- 7-8: Flexible hybrid; office presence encouraged but mostly optional.
-- 9-10: Remote-first / highly flexible; no meaningful office mandate.
-
-Calibration guidance:
-- If language is explicit and directive (for example: "required", "must", "expected to be in office"), score lower.
-- If language is optional/employee-choice focused (for example: "flexible", "may work remotely"), score higher.
-- If evidence is mixed, prefer middle values (4-7) and explain the tradeoff.
-- If excerpts contain little or no workplace policy language, return a conservative mid score (typically 4-6), and explain uncertainty.
-
-Use ONLY the provided excerpts. Output ONLY valid JSON with keys "score" (integer 0-10) and "rationale" (string). No other text."""
+_SCORING_OUTPUT_SYSTEM_SUFFIX = (
+    'Use ONLY the provided excerpts. Output ONLY valid JSON with '
+    'keys "score" (integer 0-10) and "rationale" (string). No other text.'
+)
 
 
 class Analyzer:
@@ -51,16 +45,16 @@ class Analyzer:
         )
         return self._llm
 
-    def score_rto(
+    def score(
         self,
         ticker: str,
         context: str,
     ) -> RTOScoreResult:
-        """Score the company from RTO context and return rationale."""
+        """Score the company from retrieved filing context and return rationale."""
         if not (context or "").strip():
             return RTOScoreResult(
                 score=0,
-                rationale="No RTO-related context found in the provided 10-K excerpts.",
+                rationale="No context found in the provided 10-K excerpts.",
             )
 
         user_content = f"""Company: {ticker}
@@ -71,8 +65,9 @@ Excerpts from 10-K (RTO/workplace related):
 
 Provide the JSON score and rationale."""
 
+        system_content = f"{RTO_SCORING_SYSTEM_PROMPT.rstrip()}\n\n{_SCORING_OUTPUT_SYSTEM_SUFFIX}"
         response = self._get_llm().invoke([
-            SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=system_content),
             HumanMessage(content=user_content),
         ])
         text = response.content if hasattr(response, "content") else str(response)

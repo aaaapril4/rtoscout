@@ -1,7 +1,6 @@
 """Facade: data → index → retrieve → score pipeline."""
 import gc, shutil, time
 import concurrent.futures
-import torch
 from pathlib import Path
 from tqdm import tqdm
 from typing import List, Optional, Set, Tuple
@@ -93,7 +92,7 @@ class RTOPipeline:
         PHASE 2: Send context to Ollama for scoring.
         """
         analyzer = Analyzer()
-        score_result = analyzer.score_rto(ticker, context)
+        score_result = analyzer.score(ticker, context)
         return CompanyRTOOutput(
             ticker=ticker,
             rto_score=score_result.score,
@@ -181,8 +180,13 @@ def prepare_company_worker(company: CompanyInput, years: List[int]):
 
         del pipeline
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
         if temp_persist_dir.exists():
             time.sleep(0.5) 
