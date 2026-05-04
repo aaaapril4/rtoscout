@@ -15,7 +15,7 @@ Install [Ollama](https://ollama.ai) and pull a model (e.g. `ollama pull llama3.2
 ## Run
 
 ```bash
-poetry run python run.py -i data/companies.json
+poetry run python run.py -i data/company.json
 ```
 
 **`-i` / `--input`** — JSON with rows containing at least **`ticker`**; optional **`cik`**.
@@ -28,12 +28,16 @@ From the repo root (where `.env` lives):
 
 ```bash
 docker compose build
-docker compose run --rm rtoscout python run.py -i /app/data/companies.json
+docker compose up -d ollama
+docker compose exec ollama ollama pull llama3.2   # once; match OLLAMA_MODEL in .env
+docker compose --profile cli run --rm rtoscout python run.py -i /app/company.json
 ```
 
-Mount `./data` for input; optional **`./.env` → `/app/.env`** if you want `config` to read a file in-container. Chroma volume **`chroma`** → `/app/chroma`. For Ollama on the host, set `OLLAMA_BASE_URL=http://host.docker.internal:11434` in `.env` (Linux: often `http://172.17.0.1:11434`).
+Stop Ollama on the host if port **11434** is already in use, or change the left-hand side of **`ports`** for **`ollama`** in **`docker-compose.yml`**.
 
-**Jupyter:** `docker compose --profile jupyter run --rm -p 8888:8888 jupyter` — token **`rtoscout`**; `notebooks/` is mounted.
+**Paths in the container:** **`./data`** → **`/app/data`**. **`company.json`** → **`/app/company.json`**. **`.env`** → **`/app/.env`**. Chroma: **`./chroma`** → **`/app/chroma`**.
+
+**Jupyter**: `docker compose --profile jupyter run --rm -p 8888:8888 jupyter` — token **`rtoscout`**.
 
 ## Repo layout
 

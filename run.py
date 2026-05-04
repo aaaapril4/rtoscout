@@ -50,8 +50,7 @@ def _companies_from_json(json_path: Path) -> list[CompanyInput]:
         )
         
         if "cik" in row:
-            comp.cik = str(row["cik"]).strip().zfill(10)
-
+            comp.cik = str(row["cik_str"]).strip().zfill(10)
         if comp.source == "file":
             if not comp.cik:
                 raise SystemExit(

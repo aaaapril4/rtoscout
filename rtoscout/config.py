@@ -17,7 +17,7 @@ CHROMA_PERSIST_DIR = DATA_ROOT / "chroma"
 OUT_DIR = DATA_ROOT / "outputs"
 
 FILE_TYPE = "BOTH"
-INPUT_SOURCE = "file" # "file" or "edgar"
+INPUT_SOURCE = "edgar" # "file" or "edgar"
 YEARS: tuple[int, ...] = (2025, 2026)
 
 MAX_WORKERS = 20

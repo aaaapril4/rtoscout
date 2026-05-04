@@ -1,34 +1,51 @@
-# RTOScout — Docker CLI / Jupyter
+# RTOScout — Ollama + CLI / Jupyter
 
 services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
   rtoscout:
     build: .
+    profiles:
+      - cli
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
     volumes:
-      # Mount local code so container uses your edits
       - ./rtoscout:/app/rtoscout:ro
-      # Chroma = ``<DATA_ROOT>/chroma`` in rtoscout/config.py (default /app/chroma)
-      - ./chroma_data:/app/chroma
-      - ./data:/app/data:ro
+      - ./.env:/app/.env:ro
+      - ./chroma:/app/chroma
+      - ./data:/app/data
+      - ./company.json:/app/company.json:ro
     stdin_open: true
     tty: true
-    # e.g.  docker compose run --rm rtoscout python run.py -i /app/data/companies.json
 
-  # Jupyter: docker compose --profile jupyter run --rm -p 8888:8888 jupyter
-  # Open http://localhost:8888/?token=rtoscout (or use the URL printed in the terminal)
   jupyter:
     build: .
+    profiles:
+      - jupyter
+    depends_on:
+      - ollama
     environment:
       JUPYTER_TOKEN: rtoscout
       PYTHONPATH: /app
+      OLLAMA_BASE_URL: http://ollama:11434
     ports:
       - "8888:8888"
     volumes:
-      # Mount local code so container uses your edits
       - ./rtoscout:/app/rtoscout
+      - ./.env:/app/.env:ro
       - ./chroma:/app/chroma
       - ./data:/app/data
       - ./notebooks:/app/notebooks
+      - ./company.json:/app/company.json:ro
     working_dir: /app
     command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root notebooks/
-    profiles:
-      - jupyter
+
+volumes:
+  ollama_data:
