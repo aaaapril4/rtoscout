@@ -1,6 +1,6 @@
 #!/bin/bash --login
 #BATCH Lines for Resource Request ##########
- 
+
 #SBATCH --time=1-00:00:00             # limit of wall clock time - how long the job will run (same as -t)
 #SBATCH --nodes=1                   # number of different nodes - could be an exact number or a range of nodes (same as -N)
 #SBATCH --ntasks=1                    # number of tasks - how many tasks (nodes) that you require (same as -n)
@@ -13,19 +13,24 @@
 #SBATCH --account=data-machine
 #SBATCH -o  run_log
 ########## Command Lines to Run ##########
+
+if [[ -f ".env" ]]; then
+  set -a
+  source ".env"
+  set +a
+fi
+
 module purge
 module load poetry/1.8.3
 module load Ollama/0.15.5
 
-export OLLAMA_BASE_URL=http://127.0.0.1:11434
-export OLLAMA_MODEL=llama3.2
 ollama serve > ollama.log 2>&1 &
 for i in {1..60}; do
   curl -s "$OLLAMA_BASE_URL/api/tags" >/dev/null && break
   sleep 1
 done
-ollama pull "$OLLAMA_MODEL"
+ollama pull "${OLLAMA_MODEL}"
 
-poetry run python run.py
+poetry run python run.py --input "${COMPANY_JSON}"
 
 scontrol show job $SLURM_JOB_ID     ### write job information to output file

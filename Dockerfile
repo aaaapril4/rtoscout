@@ -13,9 +13,9 @@ COPY rtoscout ./rtoscout/
 RUN poetry install --no-interaction
 
 # App
-COPY main.py ./
-COPY data ./data/
+COPY run.py .
 
 ENV PYTHONPATH=/app
 
-CMD ["python", "main.py", "--help"]
+# run.py: ``-i`` JSON path. 
+CMD ["python", "run.py", "--help"]
