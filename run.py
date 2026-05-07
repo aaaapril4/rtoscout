@@ -49,7 +49,7 @@ def _companies_from_json(json_path: Path) -> list[CompanyInput]:
             file_type=_file_type(),
         )
         
-        if "cik" in row:
+        if "cik_str" in row:
             comp.cik = str(row["cik_str"]).strip().zfill(10)
         if comp.source == "file":
             if not comp.cik:
