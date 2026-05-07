@@ -1,0 +1,51 @@
+# RTOScout — Ollama + CLI / Jupyter
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  rtoscout:
+    build: .
+    profiles:
+      - cli
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - ./rtoscout:/app/rtoscout:ro
+      - ./.env:/app/.env:ro
+      - ./chroma:/app/chroma
+      - ./data:/app/data
+      - ./company.json:/app/company.json:ro
+    stdin_open: true
+    tty: true
+
+  jupyter:
+    build: .
+    profiles:
+      - jupyter
+    depends_on:
+      - ollama
+    environment:
+      JUPYTER_TOKEN: rtoscout
+      PYTHONPATH: /app
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./rtoscout:/app/rtoscout
+      - ./.env:/app/.env:ro
+      - ./chroma:/app/chroma
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+      - ./company.json:/app/company.json:ro
+    working_dir: /app
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root notebooks/
+
+volumes:
+  ollama_data:

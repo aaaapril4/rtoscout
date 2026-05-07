@@ -1,12 +1,12 @@
 """Hybrid search: semantic multi-query over RTO-related terms."""
-from typing import Dict, List, Optional, Tuple
-
-from langchain_core.documents import Document
+import re
+from typing import Dict, List, Optional, Set
 
 from ..config import (
     RTO_QUERY_GROUP_A,
     RTO_QUERY_GROUP_B,
     TOP_K_RETRIEVAL,
+    MIN_CHUNK_LENGTH,
 )
 from ..index.vector_store import VectorStore
 
@@ -31,89 +31,101 @@ class Retriever:
         self._queries_a = group_a or RTO_QUERY_GROUP_A
         self._queries_b = group_b or RTO_QUERY_GROUP_B
 
+    def _build_company_chunks(
+        self,
+        file_id: str,
+        ticker: str,
+        file_type: str,
+        block_parts: List[str],
+    ) -> List[Dict[str, object]]:
+        """Build one row per text block for batch writing."""
+        rows = self.vector_store.get_all_chunks_for_files([file_id])
+        filing_meta = next(((r.get("metadata") or {}) for r in rows if (r.get("metadata") or {})), {})
+        blocks: List[Dict[str, object]] = []
+        for part in block_parts:
+            content = re.sub(r"\s+", " ", (part or "")).strip()
+            if not content:
+                continue
+
+            blocks.append(
+                {
+                    "file_type": file_type,
+                    "file_id": file_id,
+                    "ticker": ticker,
+                    "year": filing_meta.get("year"),
+                    "source_url": filing_meta.get("source_url"),
+                    "content": content,
+                }
+            )
+        return blocks
+
     def get_rto_context(
         self,
-        company_id: str,
-        company_name: Optional[str] = None,
-    ) -> str:
+        file_id: str,
+        ticker: str,
+        file_type: str,
+    ) -> tuple[str, List[Dict[str, object]]]:
         """
         Retrieve RTO-related context via two-pass semantic search.
-
-        1) Run semantic similarity for all group A queries (\"return to office\"
-           style) and collect hits per (company_id, chunk_index).
-        2) Run semantic similarity for all group B queries (remote / hybrid /
-           WFH style) and collect hits per (company_id, chunk_index).
-        3) Intersect the two key sets; keep only snippets that are retrieved by
-           at least one query from each group. Each hit is expanded to include
-           the previous and next chunks (when available) for context.
         """
-        # First pass: semantic hits for group A queries (broad RTO candidates)
-        # Second pass: semantic hits for group B queries, but only within the
-        # candidate set discovered by the first pass.
-        hits_a: Dict[Tuple[str, int], str] = {}
-        hits_b: Dict[Tuple[str, int], str] = {}
-        filter_dict = {"company_id": company_id}
+        filter_dict = {"file_id": file_id}
+        hits_a_indices: Set[int] = set()
+        for query in self._queries_a:
+            docs = self.vector_store.similarity_search(query, k=self.top_k, filter=filter_dict)
+            for doc in docs:
+                content = (doc.page_content or "").strip()
+                if len(content.split()) < MIN_CHUNK_LENGTH:
+                    continue
+                idx = doc.metadata.get("chunk_index")
+                if idx is not None:
+                    hits_a_indices.add(int(idx))
 
-        def _collect_hits(
-            queries: List[str],
-            allowed_keys: Optional[set[Tuple[str, int]]] = None,
-        ) -> Dict[Tuple[str, int], str]:
-            out: Dict[Tuple[str, int], str] = {}
-            for query in queries:
-                docs = self.vector_store.similarity_search(
-                    query,
-                    k=self.top_k,
-                    filter=filter_dict,
-                )
-                for doc in docs:
-                    content = (doc.page_content or "").strip()
-                    if not content:
-                        continue
-                    chunk_index = doc.metadata.get("chunk_index")
-                    if chunk_index is None:
-                        # No index; we still keep it but key on (-1) to avoid collisions.
-                        key = (company_id, -1)
-                    else:
-                        key = (company_id, int(chunk_index))
-                    if allowed_keys is not None and key not in allowed_keys:
-                        # Skip anything outside the candidate set from the first pass.
-                        continue
-                    if key in out:
-                        continue
-                    # Build the block (current ±1) for richer context when index is known.
-                    if chunk_index is not None:
-                        prev = self.vector_store.get_chunk_content(company_id, int(chunk_index) - 1)
-                        next_ = self.vector_store.get_chunk_content(company_id, int(chunk_index) + 1)
-                        block_parts = [p for p in (prev, content, next_) if p and (p or "").strip()]
-                        block = "\n\n".join(p.strip() for p in block_parts if p.strip())
-                    else:
-                        block = content
-                    if not block:
-                        continue
-                    out[key] = block
-            return out
+        if not hits_a_indices:
+            return "", []
 
-        # Pass 1: broad RTO candidates from group A
-        hits_a = _collect_hits(self._queries_a)
-        if not hits_a:
-            return ""
+        coverage_zone: Set[int] = set()
+        for idx in hits_a_indices:
+            coverage_zone.update({idx - 1, idx, idx + 1})
 
-        # Pass 2: refine using group B, but only among the group A candidates
-        hits_b = _collect_hits(self._queries_b, allowed_keys=set(hits_a.keys()))
-        if not hits_b:
-            return ""
+        hit_indices = set()
+        for query in self._queries_b:
+            docs = self.vector_store.similarity_search(query, k=self.top_k, filter=filter_dict)
+            for doc in docs:
+                content = (doc.page_content or "").strip()
+                if len(content.split()) < MIN_CHUNK_LENGTH:
+                    continue
+                idx = doc.metadata.get("chunk_index")
+                if idx is not None and int(idx) in coverage_zone:
+                    chunk_idx = int(idx)
+                    hit_indices.add(chunk_idx)
+                    if chunk_idx - 1 in hits_a_indices:
+                        hit_indices.add(chunk_idx - 1)
+                    if chunk_idx + 1 in hits_a_indices:
+                        hit_indices.add(chunk_idx + 1) 
+        
+        if not hit_indices:
+            return "", []
 
-        seen_content: set[str] = set()
-        parts: List[str] = []
-        for key, block in hits_b.items():
-            if not block:
+        sorted_indices = sorted(list(hit_indices))
+        block_parts = []
+        
+        prev = -999
+        for i in sorted_indices:
+            p = self.vector_store.get_chunk_content(file_id, i).strip()
+            
+            if not p:
                 continue
-            if block in seen_content:
-                continue
-            seen_content.add(block)
-            parts.append(block)
 
-        return "\n\n---\n\n".join(parts) if parts else ""
+            if not block_parts or i != prev + 1:
+                block_parts.append(p)
+            else:
+                block_parts[-1] += "\n\n" + p
+            
+            prev = i
 
-    # Keyword-based filters remain removed; we enforce \"must relate to both\"
-    # concepts via two independent semantic passes and intersection.
+        chunk_rows = self._build_company_chunks(file_id, ticker, file_type, block_parts)
+        if not chunk_rows:
+            return "", []
+
+        context = "\n\n---\n\n".join(block_parts) if block_parts else ""
+        return context, chunk_rows

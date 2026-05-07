@@ -1,6 +1,8 @@
-"""Clean HTML, extract text, and chunk 10-K content."""
+"""Clean HTML, extract text, and chunk 10-K/10-Q content."""
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
+import re
+import unicodedata
 
 from bs4 import BeautifulSoup
 
@@ -8,28 +10,67 @@ from ..schemas.models import DocumentChunk
 
 
 class Preprocessor:
-    """10-K text cleaning and chunking."""
+    """10-K/10-Q HTML text cleaning and chunking."""
 
     def __init__(self) -> None:
         pass
 
-    def extract_text_from_file(self, path: str | Path) -> str:
-        """Extract and clean text from a local file (HTML or plain text)."""
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-        raw = path.read_text(encoding="utf-8", errors="replace")
-        if path.suffix.lower() in (".html", ".htm"):
-            return self._clean_html_to_string(raw)
-        return self._normalize_whitespace(raw)
+    def _sec_archives_url_from_path(self, path: Path) -> Optional[str]:
+        """
+        Conversion from a downloaded SEC filing path to an SEC Archives URL.
+        """
+        parts = path.resolve().parts
+        if "sec-edgar-filings" not in parts:
+            return None
+        try:
+            idx = parts.index("sec-edgar-filings")
+            cik = int(parts[idx + 1])
+            accession = parts[idx + 3].replace("-", "")
+            return f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession}"
+        except (ValueError, IndexError, TypeError):
+            return None
 
-    def extract_text_from_dir(self, dir_path: str | Path) -> str:
-        """Find the primary document in a 10-K download dir and extract text (usually .htm)."""
-        dir_path = Path(dir_path)
-        if not dir_path.is_dir():
-            raise NotADirectoryError(f"Not a directory: {dir_path}")
-        primary = self._find_primary_html(dir_path)
-        return self.extract_text_from_file(primary)
+    def extract_fiscal_year_from_document(self, soup: BeautifulSoup, file_type: str) -> Optional[int]:
+        """
+        Extract the document period end year from the 10-K/10-Q HTML.
+        Looks for the inline XBRL block with name="dei:DocumentPeriodEndDate"
+        (content is typically "Month DD, YYYY"). Returns the 4-digit year or None.
+        """
+        def extract_year(el):
+            if not el:
+                return
+            text = (el.get_text() or "").strip()
+            match = re.search(r"\b(20)\d{2}(?!\d)", text)
+            if match:
+                return int(match.group(0))
+            return None
+        
+        def get_clean_text(tag):
+            normalized = unicodedata.normalize('NFKD', tag.get_text())
+            return normalized
+        
+        try:
+            for attr_name in ["dei:DocumentPeriodEndDate", "dei:DocumentFiscalYearFocus"]:
+                year = extract_year(soup.find(attrs={"name": attr_name}))
+                if year:
+                    return year
+
+            if file_type == "10-K":
+                keyword = r"for\s+(?:the\s+)?(?:fiscal\s+)?(?:year|period)\s+ended[\s\S]*?(\d{4})"
+            elif file_type == "10-Q":
+                keyword = r"for\s+(?:the\s+)?(?:(?:fiscal|quarterly)\s+)?(?:period|quarter)\s+ended[\s\S]*?(\d{4})"
+            tagList = ['p', 'span', 'font', 'b', 'tr', 'div']
+            el = soup.find(lambda tag: (
+                            tag.name in tagList and
+                            re.search(keyword, get_clean_text(tag), re.I) and
+                            not tag.find(lambda child: child.name in tagList and re.search(keyword, get_clean_text(child), re.I))
+            ))
+            year = extract_year(el)
+            if year:
+                return year
+        except Exception:
+            pass
+        return None
 
     def _find_primary_html(self, dir_path: Path) -> Path:
         """Return path to primary .htm/.html in directory (exclude index)."""
@@ -41,57 +82,72 @@ class Preprocessor:
             raise FileNotFoundError(f"No .htm/.html in {dir_path}")
         return candidates[0]
 
-    def _clean_html_to_string(self, html: str) -> str:
-        """Legacy: extract all text from HTML as one string (used when not chunking from div/span)."""
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        return soup.get_text(separator="\n", strip=True)
-
-    def _strip_style_attributes(self, soup: BeautifulSoup) -> None:
-        """Remove all style attributes from every element in the tree."""
-        for tag in soup.find_all(True):
-            if tag.has_attr("style"):
-                del tag["style"]
-
     def _merge_hr_separated_paragraphs(self, paragraphs: list[str]) -> list[str]:
         """
-        Merge paragraphs that are split only by an <hr> marker.
-        This is mainly for plain-text inputs or HTML-derived lists that contain
-        literal <hr> markers.
+        Merge paragraphs based on semantic cues and <hr> proximity.
+        
+        Rules:
+        1. If a paragraph starts with a lowercase letter, merge it (highest priority).
+        2. If an <hr> is nearby (either immediately before or immediately after), 
+        check if the previous paragraph lacks terminal punctuation.
+        3. Terminal punctuation includes: . ! ? " ” ) ]
         """
+        if not paragraphs:
+            return []
 
         def _is_hr(p: str) -> bool:
             s = p.strip().lower().replace(" ", "")
             return s.startswith("<hr")
-
-        if not paragraphs:
-            return paragraphs
+        
+        def _is_pure_symbol(p: str) -> bool:
+            s = p.strip().lower().replace(" ", "")
+            return bool(re.search(r'^[^a-zA-Z]+$', s))
 
         merged: list[str] = []
-        i = 0
         n = len(paragraphs)
-        while i < n:
-            p = paragraphs[i]
-            if _is_hr(p):
-                # If an <hr> is between two paragraphs, merge next into previous.
-                if merged and i + 1 < n:
-                    # Only merge when the previous paragraph is likely still ongoing.
-                    # Heuristic: if it ends with a period, treat it as a full sentence/paragraph and do not merge.
-                    prev = merged[-1].rstrip()
-                    if not prev.endswith("."):
-                        next_p = paragraphs[i + 1]
-                        merged[-1] = (prev + " " + next_p.lstrip()).strip()
-                        i += 2
-                        continue
-                # Otherwise just skip the <hr>
-                i += 1
+        
+        for i in range(n):
+            p_strip = paragraphs[i].strip()
+            
+            if not p_strip or _is_hr(p_strip) or _is_pure_symbol(p_strip):
                 continue
-            merged.append(p)
-            i += 1
+
+            if not merged:
+                merged.append(p_strip)
+            else:
+                prev = merged[-1]
+                
+                first_letter_match = re.search(r'[a-zA-Z]', p_strip)
+            
+                if first_letter_match:
+                    is_continuation = first_letter_match.group().islower()
+                else:
+                    is_continuation = False
+                
+                has_hr_nearby = False
+                
+                if i > 0 and _is_hr(paragraphs[i-1]):
+                    has_hr_nearby = True
+                elif i > 1 and _is_hr(paragraphs[i-2]):
+                    has_hr_nearby = True
+                elif i + 1 < n and _is_hr(paragraphs[i+1]):
+                    has_hr_nearby = True
+                elif i + 2 < n and _is_hr(paragraphs[i+2]):
+                    has_hr_nearby = True
+
+                terminal_punctuations = ('.', '!', '?', '"', '”', ')', ']')
+                is_unfinished = not prev.endswith(terminal_punctuations)
+                
+                if is_continuation or (has_hr_nearby and is_unfinished):
+                    merged[-1] = " ".join(f"{prev} {p_strip}".split())
+                else:
+                    # Treat as a standalone paragraph
+                    merged.append(p_strip)
+
         return merged
 
-    def _extract_paragraphs_from_html(self, html: str) -> list[str]:
+
+    def _extract_paragraphs_from_html(self, html: str, file_type: str) -> Tuple[list[str], Optional[int]]:
         """
         Extract one paragraph per <div> or <span> in document order.
 
@@ -102,84 +158,78 @@ class Preprocessor:
         together.
         """
         soup = BeautifulSoup(html, "html.parser")
+
+        year = self.extract_fiscal_year_from_document(soup, file_type)
+
         for tag in soup(["script", "style"]):
             tag.decompose()
-        self._strip_style_attributes(soup)
+        
+        TARGET_CONTAINERS = {"div", "span", "p", "td", "th"}
         paragraphs: list[str] = []
-        for el in soup.find_all(["div", "span", "hr"]):
+        for el in soup.find_all(list(TARGET_CONTAINERS) + ["hr"]):
             name = getattr(el, "name", "").lower()
             if name == "hr":
                 paragraphs.append("<hr>")
                 continue
+            
+            if el.find(list(TARGET_CONTAINERS)):
+                continue
+            
             text = el.get_text(separator=" ", strip=True)
             text = " ".join(text.split())
             if text:
                 paragraphs.append(text)
         paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
         paragraphs = [p for p in paragraphs if not p.strip().lower().replace(" ", "").startswith("<hr")]
-        return paragraphs
-
-    def _normalize_whitespace(self, text: str) -> str:
-        """Strip lines and drop empty; keep one newline between lines."""
-        return "\n".join(line.strip() for line in text.splitlines() if line.strip())
-
-    def chunk(
-        self,
-        text: str,
-        company_id: str,
-        company_name: Optional[str] = None,
-        year: Optional[int] = None,
-    ) -> list[DocumentChunk]:
-        """Split plain text into chunks by paragraph (double newline)."""
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-        paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
-        return [
-            DocumentChunk(
-                content=p,
-                company_id=company_id,
-                company_name=company_name,
-                metadata={"chunk_index": i},
-            )
-            for i, p in enumerate(paragraphs)
-        ]
+        return paragraphs, year
 
     def load_and_chunk_file(
         self,
         path: str | Path,
-        company_id: str,
-        company_name: Optional[str] = None,
-        year: Optional[int] = None,
-    ) -> list[DocumentChunk]:
-        """Read file and chunk: HTML by div/span, plain text by double newline."""
+        file_id: str,
+        ticker: str,
+        file_type: str
+    ) -> tuple[list[DocumentChunk], Optional[int]]:
+        """Read file and chunk: HTML by div/span. Returns (chunks, fiscal year or None)."""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {path}")
         raw = path.read_text(encoding="utf-8", errors="replace")
+        source_url = self._sec_archives_url_from_path(path)
         if path.suffix.lower() in (".html", ".htm"):
-            paragraphs = self._extract_paragraphs_from_html(raw)
+            paragraphs, year = self._extract_paragraphs_from_html(raw, file_type)
             paragraphs = self._merge_hr_separated_paragraphs(paragraphs)
             return [
                 DocumentChunk(
                     content=p,
-                    company_id=company_id,
-                    company_name=company_name,
-                    metadata={"chunk_index": i},
+                    file_id=file_id,
+                    ticker=ticker,
+                    metadata={
+                        "chunk_index": i,
+                        **({"source_url": source_url} if source_url else {}),
+                        **({"year": year} if year else {}),
+                        **({"file_type": file_type} if file_type else {}),
+                    },
                 )
                 for i, p in enumerate(paragraphs)
-            ]
-        text = self._normalize_whitespace(raw)
-        return self.chunk(text, company_id, company_name, year=year)
+            ], year
+        raise NotImplementedError(f"Unsupported filing format: {path.suffix}")
 
     def load_and_chunk_dir(
         self,
         dir_path: str | Path,
-        company_id: str,
-        company_name: Optional[str] = None,
-        year: Optional[int] = None,
-    ) -> list[DocumentChunk]:
+        file_id: str,
+        ticker: str,
+        file_type: str
+    ) -> tuple[list[DocumentChunk], Optional[int]]:
         """Read primary HTML in directory and chunk by div/span."""
         dir_path = Path(dir_path)
         if not dir_path.is_dir():
             raise NotADirectoryError(f"Not a directory: {dir_path}")
         primary = self._find_primary_html(dir_path)
-        return self.load_and_chunk_file(primary, company_id, company_name, year=year)
+        return self.load_and_chunk_file(
+            primary,
+            file_id=file_id,
+            ticker=ticker,
+            file_type=file_type
+        )
