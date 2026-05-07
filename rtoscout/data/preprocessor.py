@@ -1,6 +1,6 @@
 """Clean HTML, extract text, and chunk 10-K/10-Q content."""
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import re
 import unicodedata
 
@@ -147,7 +147,7 @@ class Preprocessor:
         return merged
 
 
-    def _extract_paragraphs_from_html(self, html: str, file_type: str) -> list[str]:
+    def _extract_paragraphs_from_html(self, html: str, file_type: str) -> Tuple[list[str], Optional[int]]:
         """
         Extract one paragraph per <div> or <span> in document order.
 
